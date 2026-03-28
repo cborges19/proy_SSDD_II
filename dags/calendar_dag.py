@@ -1,8 +1,7 @@
 import os
 import pandas as pd
-import numpy as np
 from datetime import datetime, timedelta
-from airflow.decorators import dag, task
+from airflow.sdk import dag, task
 import logging
 import holidays
 import matplotlib.pyplot as plt
@@ -11,13 +10,51 @@ import matplotlib.ticker as mticker
 import seaborn as sns
 
 plt.rcParams.update({'figure.dpi': 120, 'figure.facecolor': 'white'})
-ACCENT = '#E8504A'   # rojo Airbnb
+ACCENT = '#E8504A'
 BLUE   = '#3A86FF'
 GREEN  = '#2DC653'
 
 BASE_DIR = "/home/vboxuser/SDPD2/proy_SSDD_II/data/"
 PATH_LOCAL_CSV = os.path.join(BASE_DIR, "calendar.csv")
-OUTPUT_DIR= "/home/vboxuser/SDPD2/"
+OUTPUT_DIR= "/home/vboxuser/SDPD2/calendar"
+
+log = logging.getLogger(__name__)
+
+def handle_missing_values(df, variable, threshold=0.8):
+        na_count = df[variable].isna().sum()
+        if na_count > threshold*len(df):
+            log.info(f"Dropping variable {variable} due to high missing percentage.")
+            df.drop(columns=[variable], inplace=True)
+        else:
+            log.info(f"Keeping variable {variable} with missing percentage below threshold.")
+            df[variable] = df[variable].str.replace(r'[\$,]', '', regex=True).astype(float)
+
+        return df
+
+def get_event(date):
+        year = date.year
+        holiday_es = holidays.Spain(years=year, subdiv='AN')
+        easter = [d for d, name in holiday_es.items() if 'Viernes Santo' in name]
+        
+        if easter:
+            viernes_santo = pd.Timestamp(easter[0])
+            ramos = viernes_santo - pd.Timedelta(days=7)
+            if ramos <= date <= viernes_santo + pd.Timedelta(days=1):
+                return 'Semana Santa'
+            
+        if pd.Timestamp(f'{year}-08-15') <= date <= pd.Timestamp(f'{year}-08-22'): 
+            return 'Feria de Málaga'
+        
+        if date.month == 6 and date.day == 23:
+            return 'Noche de San Juan'
+        
+        if date.month in [6, 7, 8]:
+            return 'Verano'
+        
+        if (date.month == 12 and date.day >= 20) or (date.month == 1 and date.day <= 6):
+            return 'Navidad/Reyes'
+        
+        return 'Temporada normal'
 
 @dag(
     dag_id='airbnb_calendar_taskflow',
@@ -53,19 +90,6 @@ def calendar_pipeline():
         df.to_parquet(processed_path, index=False)
 
         return processed_path
-
-    log = logging.getLogger(__name__)
-
-    def handle_missing_values(df, variable, threshold=0.8):
-        na_count = df[variable].isna().sum()
-        if na_count > threshold*len(df):
-            log.info(f"Dropping variable {variable} due to high missing percentage.")
-            df.drop(columns=[variable], inplace=True)
-        else:
-            log.info(f"Keeping variable {variable} with missing percentage below threshold.")
-            df[variable] = df[variable].str.replace(r'[\$,]', '', regex=True).astype(float)
-
-        return df
 
     @task()
     def clean(processed_path: str) -> str:
@@ -103,40 +127,15 @@ def calendar_pipeline():
 
         return cleaned_path
     
-    log = logging.getLogger(__name__)
-
-    def get_even(date):
-        year = date.year
-        holiday_es = holidays.Spain(years=year, subdiv='AN')
-        easter = [d for d, name in holiday_es.items() if 'Viernes Santo' in name]
-        
-        if easter:
-            viernes_santo = pd.Timestamp(easter[0])
-            ramos = viernes_santo - pd.Timedelta(days=7)
-            if ramos <= date <= viernes_santo + pd.Timedelta(days=1):
-                return 'Semana Santa'
-            
-        if pd.Timestamp(f'{year}-08-15') <= date <= pd.Timestamp(f'{year}-08-22'): 
-            return 'Feria de Málaga'
-        
-        if date.month == 6 and date.day == 23:
-            return 'Noche de San Juan'
-        
-        if date.month in [6, 7, 8]:
-            return 'Verano'
-        
-        if (date.month == 12 and date.day >= 20) or (date.month == 1 and date.day <= 6):
-            return 'Navidad/Reyes'
-        
-        return 'Temporada normal'
-
     @task()
     def transform(cleaned_path: str) -> str:
         df = pd.read_parquet(cleaned_path)
         log.info(f"Dataset loaded for transformation: {df.shape[0]} rows, {df.shape[1]} columns")
 
         # Event variable creation
-        df['event'] = df['date'].apply(get_even)
+        unique_date = df['date'].unique()
+        event_map = {date: get_event(pd.Timestamp(date)) for date in unique_date}
+        df['event'] = df['date'].map(event_map)
         log.info('Event variable created based on date.')
 
         # Booked variable creation
@@ -185,7 +184,7 @@ def calendar_pipeline():
             (f'{data_year}-08-15', f'{data_year}-08-22', 'Feria de Málaga', "#F1B060"),
             (f'{data_year}-12-06', f'{data_year}-12-08', 'Puente de diciembre', "#45CFEB"),
             (f'{data_year}-12-12', f'{data_year}-12-19', 'Zambombas flamencas', "#4863DA"),
-            (f'{data_year}-12-20', f'{int(data_year)+1}-01-06', 'Navidad', '#9B59B6'),
+            (f'{data_year}-12-20', f'{data_year}-01-06', 'Navidad', '#9B59B6'),
             (f'{data_year}-06-23', f'{data_year}-06-23', 'Noche de San Juan', '#E74C3C'),
         ]
 
@@ -282,7 +281,7 @@ def calendar_pipeline():
         return transformed_path
 
     @task()
-    def load(transformed_path: str):
+    def load(transformed_path: str) -> None:
         log.info("Tarea Load alcanzada correctamente.")
         log.info(f"Datos listos para cargar desde: {transformed_path}")
         log.info("Integración con Apache Spark pendiente de implementación.")
