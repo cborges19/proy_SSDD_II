@@ -5,6 +5,7 @@ import os
 from datetime import datetime, timedelta
 from airflow.decorators import dag, task
 import re
+import pyarrow
 
 
 
@@ -32,37 +33,20 @@ def airbnb_listings_pipeline():
 
     @task()
     def extract():
-        """1. EXTRACT: Carga el archivo CSV desde el disco local."""
-        print(f"Buscando archivo en: {PATH_LOCAL_CSV}")
-        
-        if not os.path.exists(PATH_LOCAL_CSV):
-            raise FileNotFoundError(f"No se encuentra el archivo en {PATH_LOCAL_CSV}. "
-                                    f"Verifica que el nombre sea 'listings.csv'.")
-        
-        # Leemos el CSV (Ajustamos encoding por si tiene tildes de Málaga)
         df = pd.read_csv(PATH_LOCAL_CSV, encoding='utf-8')
-        print(f"ÉXITO: {len(df)} filas cargadas en memoria.")
+        output_path = "/tmp/listings_processed.parquet"
+        df.to_parquet(output_path, engine='pyarrow', index=False)
         
-        # Pasamos el DataFrame como JSON a la siguiente tarea
-        return df.to_json()
-
+        print(f"Archivo guardado en {output_path}")
+        return output_path 
     @task()
-    def transform(json_data):
+    def transform(path_archivo):
         """2. TRANSFORM: Limpieza y Enriquecimiento en RAM."""
         # Convertimos el JSON de vuelta a DataFrame
-        df = pd.read_json(io.StringIO(json_data))
+        df = pd.read_parquet(path_archivo)
         print("Iniciando transformaciones...")
-        # Eliminamos columnas con mas de un 80% de valores nulos
-        NULL_THRESHOLD = 0.80
-        null_pct  = df.isnull().mean()
-        drop_cols = null_pct[null_pct > NULL_THRESHOLD].index.tolist()
-
-        print(f'Columnas eliminadas ({len(drop_cols)}): {drop_cols}')
-        df.drop(columns=drop_cols, inplace=True)
-        print('drop_high_null_cols OK ')
-
+        ################################ TRANSFORMACION PRECIO ############################3
         # El precio viene con un simbolo de dolar ($), lo eliminamos.
-
         df['price_num'] = (
             df['price']
             .str.replace(r'[\$,]', '', regex=True)
@@ -74,7 +58,7 @@ def airbnb_listings_pipeline():
         print(f'Precios igual a 0 anulados: {n_zero}')
         print('clean_price OK ')
 
-
+        ###########################3 TRANSFORMACION BOOLEANOS #######################333
         # Homogeneizamos columnas con valores t/f a True/False.
 
         BOOL_COLS = [
@@ -97,7 +81,8 @@ def airbnb_listings_pipeline():
 
         print('clean_booleans OK ')
 
-        # Tranformamos ratios (%) a formato 0-1
+        ##################### TRANSFORMACION RATIOS ####################################
+        # Transformamos ratios (%) a formato decimal 0-1 en la misma variable
         RATE_COLS = ['host_response_rate', 'host_acceptance_rate']
 
         for col in RATE_COLS:
@@ -105,26 +90,30 @@ def airbnb_listings_pipeline():
                 print(f'  {col} no encontrada, se omite')
                 continue
 
-            df[col + '_num'] = (
-                df[col]
-                .str.replace('%', '', regex=False)
-                .astype(float)/100
+            # 1. Limpieza y conversión a float en la misma columna
+            # Usamos errors='coerce' por seguridad si hay valores no numéricos
+            df[col] = (
+                pd.to_numeric(
+                    df[col].astype(str).str.replace('%', '', regex=False), 
+                    errors='coerce'
+                ) / 100
             )
 
+            # 2. Validación de rango (ahora sobre la columna original modificada)
+            # Filtramos valores que no estén entre 0 y 1 (ej. si alguien puso 150%)
             out_of_range = (
-                ~df[col + '_num'].between(0, 1, inclusive='both') &
-                df[col + '_num'].notna()
+                ~df[col].between(0, 1, inclusive='both') &
+                df[col].notna()
             ).sum()
+
             if out_of_range:
-                print(f'  {col}_num: {out_of_range} valores fuera de [0,100] → NaN')
-                df.loc[~df[col + '_num'].between(0, 1, inclusive='both'), col + '_num'] = np.nan
+                print(f'  {col}: {out_of_range} valores fuera de [0,1] → NaN')
+                df.loc[~df[col].between(0, 1, inclusive='both'), col] = np.nan
             else:
-                print(f'{col}_num: rango OK')
+                print(f'  {col}: rango OK (formato 0-1)')
 
-        print('clean_rates OK ')
-
-
-
+        print('clean_rates OK (Variables originales actualizadas)')
+        ###################### TRANSFROMACION FECHAS ######################################
         # Parseamos las fechas y detectamos posibles valores invalidos
         DATE_COLS = ['host_since', 'first_review', 'last_review']
 
@@ -141,7 +130,7 @@ def airbnb_listings_pipeline():
             if invalid_future:
                 print(f'  {col}: {invalid_future} fechas futuras detectadas → NaT')
                 df.loc[df[col] > SCRAPE_DATE, col] = pd.NaT
-
+        #!!!!!!!!!!!!!!!!!!!!!!!!!!!! VALIDACION #####################################################################333
         # Inconsistencia lógica: first_review posterior a last_review
         if 'first_review' in df.columns and 'last_review' in df.columns:
             invalid_order = (
@@ -157,19 +146,12 @@ def airbnb_listings_pipeline():
             else:
                 print('  Orden first_review / last_review: OK')
         print('clean_dates OK')
+        #####################################################################################3
+        
+        ######################### TRANSFORMACIÓN BATHROOMS .################################3
+        #  la cruzamos con bathroom_text para rellenar valores.
 
-        # Valiidamos la columna bathrooms que es númerica y la cruzamos con bathroom_text para rellenar valores.
-
-        ## Conversión y Rango Lógico
         df['bathrooms'] = pd.to_numeric(df['bathrooms'], errors='coerce')
-
-        # Detectar valores fuera de rango [0, 50]
-        mask_invalid = ~df['bathrooms'].between(0, 50, inclusive='both') & df['bathrooms'].notna()
-        invalid_bath = mask_invalid.sum()
-
-        if invalid_bath:
-            print(f"  -> {invalid_bath} valores fuera de [0,50] detectados. Seteando a NaN...")
-            df.loc[mask_invalid, 'bathrooms'] = np.nan
 
         # 2. Validación cruzada con bathrooms_text
         if 'bathrooms_text' in df.columns:
@@ -184,6 +166,7 @@ def airbnb_listings_pipeline():
             # Creamos columna temporal para comparar
             df['bathrooms_text_num'] = df['bathrooms_text'].apply(parse_bathrooms_text)
             
+        #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! VALIDACION ###############################################33
             # Calcular discrepancias
             mask_mismatch = (
                 df['bathrooms'].notna() & 
@@ -201,41 +184,131 @@ def airbnb_listings_pipeline():
 
         print('clean_bathrooms OK')
         print(f"Nulos finales en 'bathrooms': {df['bathrooms'].isnull().sum()}")
+        ##########################################################################################################
 
-        # Limpieza final de variables no relevantes
+        ################################33 IS_SUPERHOST? ################################################
+        # Imputar valores nulos de la variable host_is_superhost usando las variables number_of_reviews,
+        #  host_response_rate, host_acceptance_rate y reviews_scores_rating (agrupado por host_id).
 
-        cols_to_drop = [
-            # Identificadores y URLs
-            'scrape_id','host_thumbnail_url', 'host_picture_url','price' # ya tenemos price_num
+        # Rellenar nulos dentro del mismo host usando el valor más frecuente (moda) o el primero disponible
+        # Rellenar nulos usando el valor más común del mismo host_id
+        df['host_is_superhost'] = df.groupby('host_id')['host_is_superhost'].transform(
+            lambda x: x.fillna(x.mode()[0] if not x.mode().empty else pd.NA)
+        )
+        # Segun AirBNB un superhost debe
+        # review_scores_rating >= 4.8
+        # host_response_rate >= 90%
+        # host_acceptance_rate >= 90%
+        # number_of_reviews > 0
+        condicion_superhost = (
+            (df['review_scores_rating'] >= 4.8) & 
+            (df['host_response_rate'] >= 0.9) & 
+            (df['host_acceptance_rate'] >= 0.9) &
+            (df['number_of_reviews'] >= 5)
+        )
+
+        # Solo aplicamos a los que siguen siendo nulos
+        df.loc[df['host_is_superhost'].isna() & condicion_superhost, 'host_is_superhost'] = True
+
+        # El resto de nulos que no cumplieron la condición, los marcamos como False
+        df['host_is_superhost'] = df['host_is_superhost'].fillna(False)
+
+
+       
+
+
+        ################################# VALORES NULOS HOST_RESPONSE_TIME ######################
+        # Lo hacemos mediante la moda agrupando por si el host es superhost o no
+        df['host_response_time'] = df.groupby('host_is_superhost')['host_response_time'].transform(
+            lambda x: x.fillna(x.mode()[0] if not x.mode().empty else "unknown")
+        )
+
+
+
+        ################################## VALORES NULOS HOST_ACCEPTANCE_RATE HOST_RESPONSE_RATE ##################
+        def imputar_mediana_con_ruido(serie):
+            # Si el grupo está totalmente vacío, lo devolvemos tal cual
+            if serie.isnull().all():
+                return serie
             
-            # Variables "Minimum/Maximum" redundantes (nos quedamos con minimum_nights)
+            mediana = serie.median()
+            desviacion = serie.std()
+            
+            # Si no hay desviación (solo un dato), ponemos un ruido mínimo (1%)
+            if pd.isna(desviacion) or desviacion == 0:
+                desviacion = 0.01
+            
+            nulos = serie.isna()
+            total_nulos = nulos.sum()
+            
+            if total_nulos > 0:
+                # Generar ruido
+                ruido = np.random.normal(loc=0, scale=desviacion * 0.1, size=total_nulos)
+                # Calcular nuevos valores y asegurar rango [0, 1]
+                valores_uevos = np.clip(mediana + ruido, 0, 1)
+                
+                # REEMPLAZO SEGURO:
+                # Creamos una serie con los nuevos valores y el índice correcto
+                reemplazos = pd.Series(valores_uevos, index=serie.index[nulos])
+                serie = serie.fillna(reemplazos)
+                
+            return serie
+
+        df['host_acceptance_rate'] = df.groupby('host_is_superhost')['host_acceptance_rate'].transform(imputar_mediana_con_ruido)
+
+        df['host_response_rate'] = df.groupby(
+            ['host_is_superhost', 'host_response_time'], 
+            group_keys=False
+        )['host_response_rate'].apply(imputar_mediana_con_ruido)
+
+
+
+         ############################### ELIMINACION DE VARIABLES ################################
+        cols_to_drop = [
+            'scrape_id', 'host_thumbnail_url', 'host_picture_url', 'price', 
             'minimum_minimum_nights', 'maximum_minimum_nights', 
             'minimum_maximum_nights', 'maximum_maximum_nights',
-        
-
-            
-            # Preferimos 'calculated_host_listings_count' sobre 'host_listings_count' (más fiable)
-            'host_listings_count', 'host_total_listings_count'
+            'host_listings_count', 'host_total_listings_count',
+            'host_about', 'host_url', 'host_neighbourhood',
+            'neighbourhood_overview', 'neighbourhood', 'neighbourhood_group_cleansed'
         ]
 
-        # Filtrar solo las columnas que realmente existan en el DataFrame para evitar errores
-        existing_cols_to_drop = [c for c in cols_to_drop if c in df.columns]
+        # Eliminamos las columnas. errors='ignore' evita que falle si una ya no existe
+        df_cleaned = df.drop(columns=cols_to_drop, errors='ignore')
 
-        df_cleaned = df.drop(columns=existing_cols_to_drop)
+        ################################## RENOMBRACIONES #####################################
+        renames = {
+            'calculated_host_listings_count': 'host_listings_count',
+            'calculated_host_listings_count_entire_homes': 'host_listings_count_eh',
+            'calculated_host_listings_count_private_rooms': 'host_listings_count_pr',
+            'calculated_host_listings_count_shared_rooms': 'host_listings_count_sr',
+            'calculated_host_listings_count_hotel_rooms': 'host_listings_count_hr'
+        }
+
+        # Aplicamos los nuevos nombres
+        df_cleaned.rename(columns=renames, inplace=True)
+
+        print(f"Limpieza y renombrado OK. Columnas actuales: {len(df_cleaned.columns)}")
+
 
         # --- REPORTE DE LIMPIEZA ---
-        print(f"Columnas eliminadas: {len(existing_cols_to_drop)}")
+        print(f"Columnas eliminadas: {len(cols_to_drop)}")
         print(f"Columnas restantes: {df_cleaned.shape[1]}")
 
-        return df.to_json()
+        # 1. Definimos una ruta para el archivo transformado
+        path_transformado = "/tmp/listings_transformed.parquet"
+        
+        # 2. Guardamos el archivo físicamente en el disco
+        df_cleaned.to_parquet(path_transformado, index=False)
+        
+        # 3. DEVOLVEMOS LA RUTA (un string), no los bytes
+        return path_transformado
     
     @task()
-    def enrichment(json_data):
-        import pandas as pd
-        import numpy as np
-        import io
+    def enrichment(path_archivo):
 
-        df = pd.read_json(io.StringIO(json_data))
+
+        df = pd.read_parquet(path_archivo)
         df['host_since'] = pd.to_datetime(df['host_since'])
 
         # 2. ANTIGÜEDAD 
@@ -253,7 +326,7 @@ def airbnb_listings_pipeline():
             if count <= 5: return 'Small_Investor'
             return 'Agency'
 
-        df['host_segment'] = df['calculated_host_listings_count'].apply(segment_host)
+        df['host_segment'] = df['host_listings_count'].apply(segment_host)
 
         # 5. AMENITIES ESTRATÉGICAS
         # Usamos .fillna('') para evitar errores de tipo si amenities es NaN
@@ -289,16 +362,20 @@ def airbnb_listings_pipeline():
 
         print(f"Registros procesados: {len(df)}")
         
-        return df.to_json()
+        path_enriquecido = "/tmp/listings_enriched.parquet"
+        
+        df.to_parquet(path_enriquecido, index=False)
+        
+        return path_enriquecido
 
 
     @task()
-    def eda_report(json_data: str) -> str:
+    def eda_report(path_archivo: str) -> str:
         """EDA: Genera dashboard HTML interactivo con análisis exploratorio."""
         import json, math
         from collections import Counter
 
-        df = pd.read_json(io.StringIO(json_data))
+        df = pd.read_parquet(path_archivo)
         os.makedirs(EDA_OUTPUT_DIR, exist_ok=True)
 
         # ── helpers ──────────────────────────────────────────────────────────────
@@ -796,24 +873,28 @@ def airbnb_listings_pipeline():
             f.write(html)
 
         print(f"EDA dashboard guardado en: {out_path}")
-        return json_data  # pasa los datos sin modificar a la siguiente tarea
+        return path_archivo  # pasa los datos sin modificar a la siguiente tarea
 
     @task()
-    def load(json_final):
+    def load(path_final): # Recibe la ruta que viene de enrichment o eda
         """3. LOAD: Guardado del CSV final enriquecido."""
-        df = pd.read_json(io.StringIO(json_final))
         
-        # Aseguramos que la carpeta de salida existe
+        df = pd.read_parquet(path_final)
+        
         os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
         
         df.to_csv(OUTPUT_FILE, index=False)
+        
         print(f"PROCESO FINALIZADO. Archivo guardado en: {OUTPUT_FILE}")
         print(f"Registros finales: {len(df)}")
 
-   # --- FLUJO ACTUALIZADO ---
-    raw_data       = extract()
-    transformed    = transform(raw_data)
-    enriched       = enrichment(transformed)
-    eda_done       = eda_report(enriched)   
-    load(eda_done)
+    # --- FLUJO RECOMENDADO ---
+    raw_path       = extract()      
+    transformed_path = transform(raw_path) 
+    enriched_path  = enrichment(transformed_path) 
+
+
+    eda_report(enriched_path) 
+
+    load(enriched_path)
 dag_instance = airbnb_listings_pipeline()
