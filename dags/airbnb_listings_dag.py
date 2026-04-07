@@ -270,7 +270,7 @@ def airbnb_listings_pipeline():
             'minimum_maximum_nights', 'maximum_maximum_nights',
             'host_listings_count', 'host_total_listings_count',
             'host_about', 'host_url', 'host_neighbourhood',
-            'neighbourhood_overview', 'neighbourhood', 'neighbourhood_group_cleansed'
+            'neighborhood_overview', 'neighbourhood', 'neighbourhood_group_cleansed','calendar_updated'
         ]
 
         # Eliminamos las columnas. errors='ignore' evita que falle si una ya no existe
