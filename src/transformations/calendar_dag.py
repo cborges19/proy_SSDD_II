@@ -16,45 +16,68 @@ GREEN  = '#2DC653'
 
 BASE_DIR = "/home/vboxuser/SDPD2/proy_SSDD_II/data/"
 PATH_LOCAL_CSV = os.path.join(BASE_DIR, "calendar.csv")
-OUTPUT_DIR= "/home/vboxuser/SDPD2/calendar"
+OUTPUT_DIR= "/tmp/airbnb_calendar_output"
 
 log = logging.getLogger(__name__)
 
 def handle_missing_values(df, variable, threshold=0.8):
-        na_count = df[variable].isna().sum()
-        if na_count > threshold*len(df):
-            log.info(f"Dropping variable {variable} due to high missing percentage.")
-            df.drop(columns=[variable], inplace=True)
-        else:
-            log.info(f"Keeping variable {variable} with missing percentage below threshold.")
-            df[variable] = df[variable].str.replace(r'[\$,]', '', regex=True).astype(float)
+    """
+    Handles missing values for a specific variable by either dropping the column 
+    if the null count exceeds a threshold or cleaning and converting it to float.
 
-        return df
+    Args:
+        df (pd.DataFrame): The DataFrame containing the data.
+        variable (str): The name of the column to process.
+        threshold (float): The maximum allowed ratio of missing values (0 to 1). Defaults to 0.8.
+
+    Returns:
+        pd.DataFrame: The processed DataFrame with the column either modified or removed.
+    """
+    na_count = df[variable].isna().sum()
+    if na_count > threshold * len(df):
+        log.info(f"Dropping variable {variable} due to high missing percentage.")
+        df.drop(columns=[variable], inplace=True)
+    else:
+        log.info(f"Keeping variable {variable} with missing percentage below threshold.")
+        df[variable] = df[variable].str.replace(r'[\$,]', '', regex=True).astype(float)
+
+    return df
 
 def get_event(date):
-        year = date.year
-        holiday_es = holidays.Spain(years=year, subdiv='AN')
-        easter = [d for d, name in holiday_es.items() if 'Viernes Santo' in name]
+    """
+    Categorizes a given date into specific seasonal events or holidays, 
+    including Easter (Semana Santa), Málaga's Fair, and summer periods.
+
+    Args:
+        date (datetime or pd.Timestamp): The date to be categorized.
+
+    Returns:
+        str: The name of the detected event (e.g., 'Semana Santa', 'Feria de Málaga', 
+            'Verano') or 'Temporada normal' if no special event is matched.
+    """
+    year = date.year
+    holiday_es = holidays.Spain(years=year, subdiv='AN')
+    easter = [d for d, name in holiday_es.items() if 'Viernes Santo' in name]
+    
+    if easter:
+        viernes_santo = pd.Timestamp(easter[0])
+        ramos = viernes_santo - pd.Timedelta(days=7)
+        if ramos <= date <= viernes_santo + pd.Timedelta(days=1):
+            return 'Semana Santa'
         
-        if easter:
-            viernes_santo = pd.Timestamp(easter[0])
-            ramos = viernes_santo - pd.Timedelta(days=7)
-            if ramos <= date <= viernes_santo + pd.Timedelta(days=1):
-                return 'Semana Santa'
-            
-        if pd.Timestamp(f'{year}-08-15') <= date <= pd.Timestamp(f'{year}-08-22'): 
-            return 'Feria de Málaga'
-        
-        if date.month == 6 and date.day == 23:
-            return 'Noche de San Juan'
-        
-        if date.month in [6, 7, 8]:
-            return 'Verano'
-        
-        if (date.month == 12 and date.day >= 20) or (date.month == 1 and date.day <= 6):
-            return 'Navidad/Reyes'
-        
-        return 'Temporada normal'
+    if pd.Timestamp(f'{year}-08-15') <= date <= pd.Timestamp(f'{year}-08-22'): 
+        return 'Feria de Málaga'
+    
+    if date.month == 6 and date.day == 23:
+        return 'Noche de San Juan'
+    
+    if date.month in [6, 7, 8]:
+        return 'Verano'
+    
+    if (date.month == 12 and date.day >= 20) or (date.month == 1 and date.day <= 6):
+        return 'Navidad/Reyes'
+    
+    return 'Temporada normal'
 
 @dag(
     dag_id='airbnb_calendar_taskflow',
@@ -72,7 +95,14 @@ def get_event(date):
 def calendar_pipeline():
     
     @task()
-    def extract() -> str:
+    def extract():
+        """
+        Reads the raw calendar CSV file using a predefined schema, processes the 
+        data types, and saves the resulting dataset into a Parquet file.
+
+        Returns:
+            str: The file path where the processed Parquet dataset is stored.
+        """
         dtype_dict = {
             'listing_id': 'int64',
             'date': 'str',
@@ -85,26 +115,39 @@ def calendar_pipeline():
 
         df = pd.read_csv(PATH_LOCAL_CSV, dtype=dtype_dict) 
 
-        # Guardamoe el DataFrame en formato Parquet
+        # Save dataset in parket format
         processed_path = os.path.join(OUTPUT_DIR, "processed_calendar.parquet")
         df.to_parquet(processed_path, index=False)
 
         return processed_path
 
     @task()
-    def clean(processed_path: str) -> str:
+    def transform(processed_path: str):
+        """
+        Performs data cleaning and feature engineering on the calendar dataset. 
+        
+        This includes converting types (date, boolean, numeric), handling missing 
+        values for pricing, and generating new features such as 'event' (holidays), 
+        'booked' status, and time-based flags (weekend, month).
+
+        Args:
+            processed_path (str): Path to the input Parquet file.
+
+        Returns:
+            str: Path to the finalized transformed Parquet file.
+        """
         # Load dataset
         df = pd.read_parquet(processed_path)
         log.info(f"Dataset loaded: {df.shape[0]} rows, {df.shape[1]} columns")
 
-        # Date conversion
-        df['date'] = pd.to_datetime(df['date'], errors='coerce') # coerce para datos faltantes que pasen a ser NA
+        # --------- DATE TO DATETIME ---------
+        df['date'] = pd.to_datetime(df['date'], errors='coerce') # coerce for missing data to be NAN
         date_na = df['date'].isna().sum()
         if date_na > 0:
             log.warning(f"Found {date_na} missing values in 'date' column after conversion.")
 
-        # Available convesion to boolean
-        df['available'] = df['available'].map({'t': True, 'f': False}) # Convertir available a booleano
+        # --------- AVAILAVEL TO BOOL ---------
+        df['available'] = df['available'].map({'t': True, 'f': False})
         log.info('Available variable converted to boolean.')
 
         # Dinamic gestión for price an adjusted_price variables
@@ -120,55 +163,78 @@ def calendar_pipeline():
                 df[col] = pd.to_numeric(df[col], errors='coerce').astype('Int32')
                 log.info(f'{col} variable converted to Int32 with NA handling.')
 
-        # Save cleaned dataset in Parquet format
-        cleaned_path = os.path.join(OUTPUT_DIR, "cleaned_calendar.parquet")
-        df.to_parquet(cleaned_path, index=False)
-        log.info(f'Cleaned dataset saved to {cleaned_path}')
-
-        return cleaned_path
-    
-    @task()
-    def transform(cleaned_path: str) -> str:
-        df = pd.read_parquet(cleaned_path)
-        log.info(f"Dataset loaded for transformation: {df.shape[0]} rows, {df.shape[1]} columns")
-
-        # Event variable creation
+        # --------- EVENT FEATURE CREATION ---------
         unique_date = df['date'].unique()
         event_map = {date: get_event(pd.Timestamp(date)) for date in unique_date}
         df['event'] = df['date'].map(event_map)
         log.info('Event variable created based on date.')
 
-        # Booked variable creation
+        # --------- BOOKED FEATURE CREATION ---------
         df['booked'] = ~df['available']
         log.info('Booked variable created as inverse of available.')
 
-        # Date new variables creation
+        # --------- MONTH FEATURE CREATION ---------
         df['month'] = df['date'].dt.month
+
+        # --------- DAY_OF_WEEK FEATURE CREATION ---------
         df['day_of_week'] = df['date'].dt.dayofweek
+
+        # --------- IS_WEEKEND FEATURE CREATION ---------
         df['is_weekend'] = df['day_of_week'].isin([5, 6])
         log.info('New date-based variables created: month, day_of_week, is_weekend.')
 
-        # min_night_group variable creation
-        night_bins = [0, 1, 2, 3, 7, 14, 30, 100, 9999]
-        night_labels = ['1', '2', '3', '4-7', '8-14', '15-30', '31-100', '>100']
-        df['min_night_group'] = pd.cut(
-            df['minimum_nights'], bins=night_bins, labels=night_labels
-        )
-        log.info("minimun_nights varible created")
-
-        # Guardar el DataFrame transformado en formato Parquet
+        # Save de DataFrame in parquet format
         transformed_path = os.path.join(OUTPUT_DIR, "transformed_calendar.parquet")
         df.to_parquet(transformed_path, index=False)
         log.info(f'Transformed dataset saved to {transformed_path}')
 
         return transformed_path
+    
+    @task()
+    def validate(transformed_path: str):
+        """
+        Performs data quality checks on the transformed dataset to ensure 
+        schema integrity and correct data types before final delivery.
+
+        Args:
+            transformed_path (str): Path to the Parquet file to be validated.
+
+        Returns:
+            str: The same path if validation passes, allowing for task chaining.
+        """
+        df = pd.read_parquet(transformed_path)
+        log.info(f"Dataset loaded: {df.shape[0]} rows, {df.shape[1]} columns")
+
+        # Verify if availabe is bool tipe
+        if not pd.api.types.is_bool_dtype(df['available']):
+            log.warning("Variable available not transformed correctly")
+
+        if not pd.api.types.is_datetime64_dtype(df['date']):
+            log.warning("Variable date not transformed correctly")
+    
+        return transformed_path
 
     @task()
-    def EDA(transformed_path: str) -> str:
+    def EDA(transformed_path: str):
+        """
+        Generates a suite of data visualizations to analyze Airbnb occupancy patterns.
+        
+        This includes:
+        1. Daily occupancy trends with rolling averages and holiday overlays.
+        2. Weekly patterns comparing weekdays vs. weekends.
+        3. Monthly heatmap cross-referenced with days of the week.
+        4. Categorical analysis of occupancy rates during special events.
+
+        Args:
+            transformed_path (str): Path to the transformed Parquet file.
+
+        Saves:
+            PNG plots for daily, weekly, and monthly trends to the output directory.
+        """
         df = pd.read_parquet(transformed_path)
         log.info(f"Dataset loaded for EDA: {df.shape[0]} rows, {df.shape[1]} columns")
 
-        # Diary ocupation rate
+        # --------- DIARY OCUPATION RATE ---------
         daily_occ = df.groupby('date')['booked'].mean()
         daily_occ_7d  = daily_occ.rolling(7,  center=True).mean()
         daily_occ_30d = daily_occ.rolling(30, center=True).mean()
@@ -213,7 +279,7 @@ def calendar_pipeline():
         fig.savefig(os.path.join(OUTPUT_DIR, "ocupacion_diaria.png"), dpi=150, bbox_inches='tight')
         plt.close(fig)
 
-        # Weakly ocupation
+        # --------- WEAKLY OCUPATION PLOT ---------
         day_labels_es = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom']
 
         weekly_occ = (df.groupby('day_of_week')['booked']
@@ -237,7 +303,7 @@ def calendar_pipeline():
         fig.savefig(os.path.join(OUTPUT_DIR, "ocupacion_semanal.png"), dpi=150, bbox_inches='tight')
         plt.close(fig)
 
-        # Heat map ocupation by month and day of week
+        # --------- HEATMAP OCUPATION BY MONTH ---------
         month_labels = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
         pivot = (df
                 .groupby(['month', 'day_of_week'])['booked']
@@ -256,7 +322,7 @@ def calendar_pipeline():
         fig.savefig(os.path.join(OUTPUT_DIR, "ocupacion_heatmap.png"), dpi=150, bbox_inches='tight')
         plt.close(fig)
 
-        # Special events analysis
+        # --------- SPECIAL EVENTS PLOT ---------
         event_stats = (df
                     .groupby('event')
                     .agg(
@@ -277,19 +343,18 @@ def calendar_pipeline():
         plt.tight_layout()
         fig.savefig(os.path.join(OUTPUT_DIR, "analisis_eventos.png"), dpi=150, bbox_inches='tight')
         plt.close(fig)
-
-        return transformed_path
-
+        return
+    
     @task()
-    def load(transformed_path: str) -> None:
+    def load(transformed_path: str):
         log.info("Tarea Load alcanzada correctamente.")
         log.info(f"Datos listos para cargar desde: {transformed_path}")
         log.info("Integración con Apache Spark pendiente de implementación.")
     
     # Order of execution
     processed_path = extract()
-    cleaned_path = clean(processed_path)
-    transformed_path = transform(cleaned_path)
+    transformed_path = transform(processed_path)
+    validate(transformed_path)
     EDA(transformed_path)
     load(transformed_path)
 

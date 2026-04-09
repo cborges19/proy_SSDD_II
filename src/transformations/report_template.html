@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Airbnb Málaga — EDA Report</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+    :root {
+        --bg: #0f1117; --card: #1a1d27; --border: #2a2d3a;
+        --text: #e8eaf0; --muted: #8b8fa8; --accent: #ff5a5f;
+        --blue: #4e9af1; --green: #43c78a; --amber: #f5a623;
+        --purple: #9b7ee8; --teal: #2eccc4;
+        --font: 'Segoe UI', system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: var(--font); padding: 0; }
+    header {
+        background: linear-gradient(135deg, #1a1d27 0%, #12151f 100%);
+        border-bottom: 1px solid var(--border);
+        padding: 28px 40px 22px;
+        display: flex; align-items: flex-end; gap: 24px; flex-wrap: wrap;
+    }
+    header h1 { font-size: 1.7rem; font-weight: 700; letter-spacing: -.5px; }
+    header h1 span { color: var(--accent); }
+    .badge {
+        background: var(--card); border: 1px solid var(--border);
+        border-radius: 20px; padding: 4px 14px; font-size: .78rem;
+        color: var(--muted); white-space: nowrap;
+    }
+    .badge b { color: var(--text); }
+    main { padding: 32px 40px; max-width: 1400px; margin: 0 auto; }
+    .section-title { font-size: .7rem; font-weight: 600; letter-spacing: 1.5px;
+        text-transform: uppercase; color: var(--muted); margin: 32px 0 14px; }
+    .grid { display: grid; gap: 16px; }
+    .grid-4 { grid-template-columns: repeat(4, 1fr); }
+    .grid-3 { grid-template-columns: repeat(3, 1fr); }
+    .grid-2 { grid-template-columns: repeat(2, 1fr); }
+    .grid-1 { grid-template-columns: 1fr; }
+    @media(max-width: 1100px) { .grid-4 { grid-template-columns: repeat(2,1fr); } }
+    @media(max-width: 700px)  { .grid-4,.grid-3,.grid-2 { grid-template-columns: 1fr; } }
+    .card {
+        background: var(--card); border: 1px solid var(--border);
+        border-radius: 14px; padding: 20px 22px; position: relative; overflow: hidden;
+    }
+    .card::before {
+        content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+        background: var(--card-accent, transparent); border-radius: 14px 14px 0 0;
+    }
+    .card.accent-red   { --card-accent: var(--accent); }
+    .card.accent-blue  { --card-accent: var(--blue);   }
+    .card.accent-green { --card-accent: var(--green);  }
+    .card.accent-amber { --card-accent: var(--amber);  }
+    .card.accent-purple{ --card-accent: var(--purple); }
+    .card.accent-teal  { --card-accent: var(--teal);   }
+    .kpi-label { font-size: .72rem; color: var(--muted); text-transform: uppercase;
+        letter-spacing: .8px; margin-bottom: 6px; }
+    .kpi-value { font-size: 2.1rem; font-weight: 700; line-height: 1; }
+    .kpi-sub   { font-size: .8rem; color: var(--muted); margin-top: 5px; }
+    .chart-title { font-size: .82rem; font-weight: 600; color: var(--muted);
+        margin-bottom: 16px; letter-spacing: .3px; }
+    canvas { display: block; }
+    .corr-grid {
+        display: grid; gap: 2px;
+        grid-template-columns: repeat(var(--cols), 1fr);
+        font-size: .6rem; text-align: center;
+    }
+    .corr-cell {
+        aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
+        border-radius: 3px; font-size: .6rem; font-weight: 500;
+    }
+    .corr-label { padding: 4px 2px; color: var(--muted); font-size: .62rem;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .corr-header { color: var(--muted); font-size: .6rem; padding: 2px;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center; }
+    .null-bar-wrap { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+    .null-col-name  { font-size: .73rem; color: var(--text); width: 190px;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; }
+    .null-bar-bg  { flex: 1; height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
+    .null-bar-fill{ height: 100%; border-radius: 4px; background: var(--accent); }
+    .null-pct  { font-size: .72rem; color: var(--muted); width: 38px; text-align: right; }
+    .superhost-row { display: flex; gap: 16px; flex-wrap: wrap; }
+    .superhost-card {
+        flex: 1; min-width: 160px; background: var(--bg); border: 1px solid var(--border);
+        border-radius: 10px; padding: 16px; text-align: center;
+    }
+    .sh-label { font-size: .73rem; color: var(--muted); margin-bottom: 6px; }
+    .sh-price { font-size: 1.5rem; font-weight: 700; }
+    .sh-n { font-size: .72rem; color: var(--muted); margin-top: 4px; }
+    footer {
+        text-align: center; padding: 28px; font-size: .75rem; color: var(--muted);
+        border-top: 1px solid var(--border); margin-top: 40px;
+    }
+    </style>
+</head>
+<body>
+    <header>
+        <div>
+            <h1>Airbnb <span>Málaga</span> — EDA Report</h1>
+            <div style="margin-top:8px;font-size:.82rem;color:var(--muted)">
+            Datos scrapeados al 30 sep 2025 · Generado por Apache Airflow
+            </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-left:auto" id="badges"></div>
+    </header>
+    <main>
+        <div class="section-title">Resumen del dataset</div>
+        <div class="grid grid-4" id="kpis"></div>
+
+        <div class="section-title">Distribución de precios</div>
+        <div class="grid grid-2">
+            <div class="card accent-red">
+                <div class="chart-title">Precio por noche (€) — clip &lt;500 | histograma</div>
+                <canvas id="chartPrice" height="160"></canvas>
+            </div>
+            <div class="card accent-amber">
+                <div class="chart-title">Precio mediano por barrio (top 15, mín 10 listings)</div>
+                <canvas id="chartNeigh" height="160"></canvas>
+            </div>
+        </div>
+
+        <div class="section-title">Tipo de alojamiento y anfitriones</div>
+        <div class="grid grid-3">
+            <div class="card accent-blue">
+                <div class="chart-title">Tipo de habitación</div>
+                <canvas id="chartRoom" height="180"></canvas>
+            </div>
+            <div class="card accent-purple">
+                <div class="chart-title">Segmento de anfitrión</div>
+                <canvas id="chartSeg" height="180"></canvas>
+            </div>
+            <div class="card accent-green">
+                <div class="chart-title">Superhost vs Regular — precio mediano (€)</div>
+                <div class="superhost-row" id="superhostRow"></div>
+            </div>
+        </div>
+
+        <div class="section-title">Reviews y disponibilidad</div>
+        <div class="grid grid-2">
+            <div class="card accent-teal">
+                <div class="chart-title">Distribución puntuación media (review_scores_rating)</div>
+                <canvas id="chartRating" height="160"></canvas>
+            </div>
+            <div class="card accent-blue">
+                <div class="chart-title">Disponibilidad anual (días / año)</div>
+                <canvas id="chartAvail" height="160"></canvas>
+            </div>
+        </div>
+
+        <div class="section-title">Geografía y comodidades</div>
+        <div class="grid grid-2">
+            <div class="card accent-amber">
+                <div class="chart-title">Distancia al centro de Málaga (km)</div>
+                <canvas id="chartDist" height="160"></canvas>
+            </div>
+            <div class="card accent-purple">
+                <div class="chart-title">Top 20 amenities más frecuentes</div>
+                <canvas id="chartAmen" height="160"></canvas>
+            </div>
+        </div>
+
+        <div class="section-title">Calidad de datos — nulos (%)</div>
+        <div class="grid grid-1">
+            <div class="card">
+                <div class="chart-title">Top 20 columnas con más valores nulos</div>
+                <div id="nullBars"></div>
+            </div>
+        </div>
+
+        <div class="section-title">Correlaciones entre variables numéricas</div>
+        <div class="grid grid-1">
+            <div class="card accent-teal">
+                <div class="chart-title">Matriz de correlación de Pearson</div>
+                <div id="corrMatrix" style="overflow-x:auto"></div>
+            </div>
+        </div>
+    </main>
+    <footer>Pipeline: extract → transform → enrichment → <strong>eda_report</strong> → load</footer>
+
+    <script>
+    // Inyección de datos mediante Jinja2
+    const RAW = {{ payload | safe }};
+    const D = RAW;
+
+    // ── Palette ────────────────────────────────────────────────────────────────
+    const C = {
+        red:    '#ff5a5f', blue:   '#4e9af1', green:  '#43c78a',
+        amber:  '#f5a623', purple: '#9b7ee8', teal:   '#2eccc4',
+        muted:  '#8b8fa8', grid:   '#2a2d3a', text:   '#e8eaf0',
+    };
+
+    Chart.defaults.color = C.muted;
+    Chart.defaults.borderColor = C.grid;
+    Chart.defaults.font.family = "'Segoe UI', system-ui, sans-serif";
+
+    function rgba(hex, a) {
+        const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+        return `rgba(${r},${g},${b},${a})`;
+    }
+
+    // ── KPIs ───────────────────────────────────────────────────────────────────
+    const kpiData = [
+        { label:'Listings',      value: D.meta.rows.toLocaleString('es'), sub:'registros totales', accent:'red'   },
+        { label:'Columnas',      value: D.meta.cols,                      sub:`${D.meta.num} numéricas · ${D.meta.cat} categóricas`, accent:'blue'   },
+        { label:'Precio medio',  value:`€${D.price.mean}`,              sub:`mediana €${D.price.median} · p95 €${D.price.p95}`, accent:'amber'  },
+        { label:'Rating medio',  value: D.rating.mean ?? '—',             sub:'review_scores_rating', accent:'green'  },
+    ];
+    const badges = document.getElementById('badges');
+    kpiData.forEach(k => {
+        badges.insertAdjacentHTML('beforeend', `<span class="badge"><b>${k.value}</b> ${k.label}</span>`);
+    });
+    const kpis = document.getElementById('kpis');
+    kpiData.forEach(k => {
+        kpis.insertAdjacentHTML('beforeend', `
+            <div class="card accent-${k.accent}">
+                <div class="kpi-label">${k.label}</div>
+                <div class="kpi-value">${k.value}</div>
+                <div class="kpi-sub">${k.sub}</div>
+            </div>`);
+    });
+
+    // ── Helpers chart ──────────────────────────────────────────────────────────
+    function barChart(id, labels, data, color, opts={} ) {
+        return new Chart(document.getElementById(id), {
+            type:'bar',
+            data:{ labels, datasets:[{data, backgroundColor:rgba(color,.7), borderColor:color,
+            borderWidth:1, borderRadius:3, borderSkipped:false }] },
+            options:{ plugins:{legend:{display:false}}, scales:{
+            x:{grid:{color:C.grid}, ticks:{maxRotation:45, font:{size:9}}},
+            y:{grid:{color:C.grid}, ticks:{font:{size:9}}}
+            }, ...opts }
+        });
+    }
+    function hbarChart(id, labels, data, color) {
+        return new Chart(document.getElementById(id), {
+            type:'bar',
+            data:{ labels, datasets:[{data, backgroundColor:rgba(color,.7), borderColor:color,
+            borderWidth:1, borderRadius:3, borderSkipped:false }] },
+            options:{
+                indexAxis:'y',
+                plugins:{legend:{display:false}},
+                scales:{
+                    x:{grid:{color:C.grid}, ticks:{font:{size:9}}},
+                    y:{grid:{color:'transparent'}, ticks:{font:{size:9}}}
+                }
+            }
+        });
+    }
+    function doughnut(id, labels, data, colors) {
+        return new Chart(document.getElementById(id), {
+            type:'doughnut',
+            data:{ labels, datasets:[{data, backgroundColor:colors, borderColor:'#1a1d27', borderWidth:2}] },
+            options:{ plugins:{legend:{position:'right', labels:{font:{size:10}, padding:8}}},
+            cutout:'60%' }
+        });
+    }
+
+    // ── Charts ─────────────────────────────────────────────────────────────────
+    barChart('chartPrice', D.price.bins.map(v=>v.toFixed(0)), D.price.counts, C.red);
+
+    if (D.neigh_price && D.neigh_price.neighbourhood_cleansed) {
+        hbarChart('chartNeigh', D.neigh_price.neighbourhood_cleansed, D.neigh_price.median_price, C.amber);
+    }
+
+    const roomKeys = Object.keys(D.room_type);
+    doughnut('chartRoom', roomKeys, roomKeys.map(k=>D.room_type[k]), [C.blue, C.teal, C.purple, C.green]);
+
+    const segKeys = Object.keys(D.host_segment);
+    doughnut('chartSeg', segKeys, segKeys.map(k=>D.host_segment[k]), [C.purple, C.amber, C.red]);
+
+    barChart('chartRating', D.rating.bins.map(v=>v.toFixed(2)), D.rating.counts, C.teal);
+    barChart('chartAvail', D.availability.bins.map(v=>v.toString()), D.availability.counts, C.blue);
+    barChart('chartDist', D.distance.bins.map(v=>v.toFixed(1)), D.distance.counts, C.amber);
+    hbarChart('chartAmen', D.amenities.names, D.amenities.counts, C.purple);
+
+    // ── Superhost ──────────────────────────────────────────────────────────────
+    const shRow = document.getElementById('superhostRow');
+    [['Superhost', C.green], ['Regular', C.muted]].forEach(([key, col]) => {
+        const d = D.superhost[key] ?? {};
+        shRow.insertAdjacentHTML('beforeend', `
+            <div class="superhost-card">
+                <div class="sh-label">${key}</div>
+                <div class="sh-price" style="color:${col}">€${d.median ?? '—'}</div>
+                <div class="sh-n">n=${(d.n??0).toLocaleString('es')} · media €${d.mean??'—'}</div>
+            </div>`);
+    });
+
+    // ── Null bars ──────────────────────────────────────────────────────────────
+    const nullWrap = document.getElementById('nullBars');
+    D.null_data.cols.forEach((col, i) => {
+        const pct = D.null_data.pct[i];
+        const color = pct > 50 ? C.red : pct > 20 ? C.amber : C.teal;
+        nullWrap.insertAdjacentHTML('beforeend', `
+            <div class="null-bar-wrap">
+                <div class="null-col-name">${col}</div>
+                <div class="null-bar-bg"><div class="null-bar-fill" style="width:${pct}%;background:${color}"></div></div>
+                <div class="null-pct">${pct}%</div>
+            </div>`);
+    });
+
+    // ── Correlation heatmap ────────────────────────────────────────────────────
+    (function() {
+        const { labels, matrix } = D.corr;
+        if(!labels) return;
+        const n = labels.length;
+        const wrap = document.getElementById('corrMatrix');
+        wrap.style.setProperty('--cols', n + 1);
+
+        let htmlGrid = `<div class="corr-grid" style="--cols:${n+1}">`;
+        htmlGrid += `<div></div>`;
+        labels.forEach(l => htmlGrid += `<div class="corr-header">${l.replace(/_/g,' ')}</div>`);
+        labels.forEach((row, i) => {
+            htmlGrid += `<div class="corr-label">${row.replace(/_/g,' ')}</div>`;
+            matrix[i].forEach((val, j) => {
+                const v = val === null ? 0 : val;
+                const abs = Math.abs(v);
+                let bg, fg;
+                if (i === j) { bg = '#2a2d3a'; fg = C.muted; }
+                else if (v > 0) {
+                    bg = `rgba(78,154,241,${0.1 + abs*0.75})`;
+                    fg = abs > 0.5 ? '#fff' : C.muted;
+                } else {
+                    bg = `rgba(255,90,95,${0.1 + abs*0.75})`;
+                    fg = abs > 0.5 ? '#fff' : C.muted;
+                }
+                const disp = val === null ? '' : v.toFixed(2);
+                htmlGrid += `<div class="corr-cell" style="background:${bg};color:${fg}">${disp}</div>`;
+            });
+        });
+        htmlGrid += '</div>';
+        wrap.innerHTML = htmlGrid;
+    })();
+    </script>
+</body>
+</html>
