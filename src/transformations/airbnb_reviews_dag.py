@@ -118,8 +118,79 @@ def dag_reviews_analysis():
         # ---------- Saving Word Frequency Plot as PNG ----------
         plt.savefig(f"{PLOT_DIR}/word_frequency.png", format='png')
         plt.close()
+
+        # ---------- PREPARE DATA FOR HTML PAYLOAD ----------
+        # 1. Basic Stats
+        total_rows = len(df)
+        unique_users = int(df['reviewer_id'].nunique())
+        unique_listings = int(df['listing_id'].nunique())
+        avg_comment_len = float(df['comments_len'].mean())
+
+        # 2. Timeline Data (Using the 'year' column you already created)
+        yearly_counts = df.groupby('year').size().sort_index()
+        yearly_data = {
+            "labels": [str(y) for y in yearly_counts.index],
+            "data": yearly_counts.values.tolist()
+        }
+
+        # 3. Top Reviewers Data
+        top_reviewers = df['reviewer_id'].value_counts().head(10)
+        reviewers_data = {
+            "labels": [str(i) for i in top_reviewers.index],
+            "data": top_reviewers.values.tolist()
+        }
+
+        # 4. Length Distribution Data (Histogram)
+        # Bins for the length distribution chart
+        counts, bins = np.histogram(df['comments_len'], bins=10, range=(0, int(df['comments_len'].quantile(0.95))))
+        length_data = {
+            "labels": [f"{int(bins[i])}-{int(bins[i+1])}" for i in range(len(bins)-1)],
+            "data": counts.tolist()
+        }
+
+        # 5. Word Frequency Data (Using your existing df_words)
+        word_data = {
+            "labels": df_words['Word'].tolist(),
+            "data": df_words['Count'].tolist()
+        }
+
+        # ---------- BUILD JSON PAYLOAD FOR TEMPLATE ----------
+        payload_json = json.dumps({
+            "meta": {
+                "total_reviews": total_rows,
+                "unique_users": unique_users,
+                "unique_listings": unique_listings,
+                "avg_len": round(avg_comment_len, 2)
+            },
+            "yearly": yearly_data,
+            "reviewers": reviewers_data,
+            "length_dist": length_data,
+            "words": word_data
+        })
+
+        # ---------- JINJA2 TEMPLATE RENDERING ----------
+        # Get directory of the current DAG file
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        template_path = os.path.join(script_dir, "report_reviews.html")
+
+        # Read the HTML template file
+        with open(template_path, "r", encoding="utf-8") as f:
+            template_content = f.read()
+
+        # Render the payload into the HTML structure
+        template = Template(template_content)
+        html_final = template.render(payload=payload_json)
+
+        # ---------- SAVE FINAL DASHBOARD ----------
+        # Save the generated HTML to the PLOT_DIR
+        out_path = os.path.join(PLOT_DIR, "eda_dashboard_reviews.html")
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write(html_final)
+
+        print(f"---------- EDA Dashboard generated successfully at: {out_path} ----------")
         
         # ---------- EDA Complete ----------
+        return path
 
     @task()
     def load(path):
