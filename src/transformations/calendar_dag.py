@@ -19,7 +19,7 @@ GREEN  = '#2DC653'
 
 BASE_DIR = "/home/vboxuser/SDPD2/proy_SSDD_II/data/"
 PATH_LOCAL_CSV = os.path.join(BASE_DIR, "calendar.csv")
-OUTPUT_DIR= "/tmp/airbnb_calendar_output"
+OUTPUT_DIR= "/tmp"
 
 log = logging.getLogger(__name__)
 
