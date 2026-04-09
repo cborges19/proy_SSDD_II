@@ -8,6 +8,9 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import matplotlib.ticker as mticker
 import seaborn as sns
+import json
+from jinja2 import Template
+from pathlib import Path
 
 plt.rcParams.update({'figure.dpi': 120, 'figure.facecolor': 'white'})
 ACCENT = '#E8504A'
@@ -343,6 +346,81 @@ def calendar_pipeline():
         plt.tight_layout()
         fig.savefig(os.path.join(OUTPUT_DIR, "analisis_eventos.png"), dpi=150, bbox_inches='tight')
         plt.close(fig)
+
+        def series_to_list(s):
+            return [None if pd.isna(v) else round(float(v), 4) for v in s]
+        
+        payload = {
+            # Metadata
+            "meta": {
+                "rows":     int(len(df)),
+                "date_min": str(df['date'].min().date()),
+                "date_max": str(df['date'].max().date()),
+            },
+        
+            # KPIs
+            "kpis": {
+                "occ_mean":    round(float(df['booked'].mean()), 4),
+                "occ_weekend": round(float(df[df['day_of_week'] >= 5]['booked'].mean()), 4),
+                "occ_weekday": round(float(df[df['day_of_week'] <  5]['booked'].mean()), 4),
+                "peak_date":   str(daily_occ.idxmax().date()),
+                "peak_value":  round(float(daily_occ.max()), 4),
+            },
+        
+            # First graphic
+            "daily": {
+                "dates":  daily_occ.index.strftime('%Y-%m-%d').tolist(),
+                "values": series_to_list(daily_occ),
+                "ma7":    series_to_list(daily_occ_7d),
+                "ma30":   series_to_list(daily_occ_30d),
+                # La misma lista `events` que ya tienes definida arriba en tu task
+                "events": [
+                    {"start": start, "end": end, "label": label, "color": color}
+                    for start, end, label, color in events
+                ],
+            },
+        
+            # Second graphic
+            "weekly": {
+                "labels": ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'],
+                "mean":   [round(float(v), 4) for v in weekly_occ['mean']],
+                "ci95":   [round(float(v * 1.96), 4) for v in weekly_occ['sem']],
+            },
+        
+            # Third graphic
+            "heatmap": {
+                "months":  ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'],
+                "days":    ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'],
+                "matrix":  [
+                    [None if pd.isna(v) else round(float(v), 4) for v in row]
+                    for row in pivot.reindex(
+                        columns=range(7),   # day_of_week 0-6
+                        fill_value=float('nan')
+                    ).values
+                ],
+            },
+        
+            # Fourth graphic
+            "events_stats": {
+                "labels":     event_stats.index.tolist(),
+                "ocupacion":  [round(float(v), 4) for v in event_stats['ocupacion_media']],
+                "min_nights": [round(float(v), 2) for v in event_stats['noches_min_media']],
+                "max_nights": [round(float(v), 2) for v in event_stats['noches_max_media']],
+                "n":          [int(v)             for v in event_stats['n_registros']],
+            },
+        }
+        
+        # Render to Jinja2
+        
+        TEMPLATE_PATH = Path("/home/vboxuser/SDPD2/proy_SSDD_II/src/transformations/report_calendar.html")
+        OUTPUT_HTML = Path(OUTPUT_DIR) / "eda_report_ocupacion.html"
+        
+        template_src = TEMPLATE_PATH.read_text(encoding='utf-8')
+        template = Template(template_src)
+        html_rendered = template.render(payload=json.dumps(payload, ensure_ascii=False))
+        
+        OUTPUT_HTML.write_text(html_rendered, encoding='utf-8')
+        log.info(f"EDA HTML generado en: {OUTPUT_HTML}")
         return
     
     @task()
