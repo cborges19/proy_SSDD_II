@@ -4,10 +4,9 @@ import io
 import os
 from datetime import datetime, timedelta
 from airflow.decorators import dag, task
+
 import re
 import pyarrow
-
-
 
 BASE_DIR = "/home/vboxuser/Documentos/proy_SSDD_II/data/"
 PATH_LOCAL_CSV = os.path.join(BASE_DIR, "listings.csv")
@@ -270,7 +269,7 @@ def airbnb_listings_pipeline():
             'minimum_maximum_nights', 'maximum_maximum_nights',
             'host_listings_count', 'host_total_listings_count',
             'host_about', 'host_url', 'host_neighbourhood',
-            'neighbourhood_overview', 'neighbourhood', 'neighbourhood_group_cleansed'
+            'neighborhood_overview', 'neighbourhood', 'neighbourhood_group_cleansed','calendar_updated'
         ]
 
         # Eliminamos las columnas. errors='ignore' evita que falle si una ya no existe

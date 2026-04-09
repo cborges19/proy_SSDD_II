@@ -64,6 +64,7 @@ def dag_neighbourhoods():
 
         return paths 
 
+
     @task()
     def enrichment(paths):
         df_neighbourhoods = pd.read_parquet(paths["p_neigh"])
