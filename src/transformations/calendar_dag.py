@@ -140,13 +140,13 @@ def calendar_pipeline():
         df = pd.read_parquet(processed_path)
         log.info(f"Dataset loaded: {df.shape[0]} rows, {df.shape[1]} columns")
 
-        # Date conversion
+        # --------- DATE TO DATETIME ---------
         df['date'] = pd.to_datetime(df['date'], errors='coerce') # coerce for missing data to be NAN
         date_na = df['date'].isna().sum()
         if date_na > 0:
             log.warning(f"Found {date_na} missing values in 'date' column after conversion.")
 
-        # Available convesion to boolean
+        # --------- AVAILAVEL TO BOOL ---------
         df['available'] = df['available'].map({'t': True, 'f': False})
         log.info('Available variable converted to boolean.')
 
@@ -163,23 +163,27 @@ def calendar_pipeline():
                 df[col] = pd.to_numeric(df[col], errors='coerce').astype('Int32')
                 log.info(f'{col} variable converted to Int32 with NA handling.')
 
-        # Event variable creation
+        # --------- EVENT FEATURE CREATION ---------
         unique_date = df['date'].unique()
         event_map = {date: get_event(pd.Timestamp(date)) for date in unique_date}
         df['event'] = df['date'].map(event_map)
         log.info('Event variable created based on date.')
 
-        # Booked variable creation
+        # --------- BOOKED FEATURE CREATION ---------
         df['booked'] = ~df['available']
         log.info('Booked variable created as inverse of available.')
 
-        # Date new variables creation
+        # --------- MONTH FEATURE CREATION ---------
         df['month'] = df['date'].dt.month
+
+        # --------- DAY_OF_WEEK FEATURE CREATION ---------
         df['day_of_week'] = df['date'].dt.dayofweek
+
+        # --------- IS_WEEKEND FEATURE CREATION ---------
         df['is_weekend'] = df['day_of_week'].isin([5, 6])
         log.info('New date-based variables created: month, day_of_week, is_weekend.')
 
-        # Guardar el DataFrame transformado en formato Parquet
+        # Save de DataFrame in parquet format
         transformed_path = os.path.join(OUTPUT_DIR, "transformed_calendar.parquet")
         df.to_parquet(transformed_path, index=False)
         log.info(f'Transformed dataset saved to {transformed_path}')
@@ -188,6 +192,16 @@ def calendar_pipeline():
     
     @task()
     def validate(transformed_path: str):
+        """
+        Performs data quality checks on the transformed dataset to ensure 
+        schema integrity and correct data types before final delivery.
+
+        Args:
+            transformed_path (str): Path to the Parquet file to be validated.
+
+        Returns:
+            str: The same path if validation passes, allowing for task chaining.
+        """
         df = pd.read_parquet(transformed_path)
         log.info(f"Dataset loaded: {df.shape[0]} rows, {df.shape[1]} columns")
 
@@ -198,15 +212,29 @@ def calendar_pipeline():
         if not pd.api.types.is_datetime64_dtype(df['date']):
             log.warning("Variable date not transformed correctly")
     
-        return
+        return transformed_path
 
-        
     @task()
     def EDA(transformed_path: str):
+        """
+        Generates a suite of data visualizations to analyze Airbnb occupancy patterns.
+        
+        This includes:
+        1. Daily occupancy trends with rolling averages and holiday overlays.
+        2. Weekly patterns comparing weekdays vs. weekends.
+        3. Monthly heatmap cross-referenced with days of the week.
+        4. Categorical analysis of occupancy rates during special events.
+
+        Args:
+            transformed_path (str): Path to the transformed Parquet file.
+
+        Saves:
+            PNG plots for daily, weekly, and monthly trends to the output directory.
+        """
         df = pd.read_parquet(transformed_path)
         log.info(f"Dataset loaded for EDA: {df.shape[0]} rows, {df.shape[1]} columns")
 
-        # Diary ocupation rate
+        # --------- DIARY OCUPATION RATE ---------
         daily_occ = df.groupby('date')['booked'].mean()
         daily_occ_7d  = daily_occ.rolling(7,  center=True).mean()
         daily_occ_30d = daily_occ.rolling(30, center=True).mean()
@@ -251,7 +279,7 @@ def calendar_pipeline():
         fig.savefig(os.path.join(OUTPUT_DIR, "ocupacion_diaria.png"), dpi=150, bbox_inches='tight')
         plt.close(fig)
 
-        # Weakly ocupation
+        # --------- WEAKLY OCUPATION PLOT ---------
         day_labels_es = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom']
 
         weekly_occ = (df.groupby('day_of_week')['booked']
@@ -275,7 +303,7 @@ def calendar_pipeline():
         fig.savefig(os.path.join(OUTPUT_DIR, "ocupacion_semanal.png"), dpi=150, bbox_inches='tight')
         plt.close(fig)
 
-        # Heat map ocupation by month and day of week
+        # --------- HEATMAP OCUPATION BY MONTH ---------
         month_labels = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
         pivot = (df
                 .groupby(['month', 'day_of_week'])['booked']
@@ -294,7 +322,7 @@ def calendar_pipeline():
         fig.savefig(os.path.join(OUTPUT_DIR, "ocupacion_heatmap.png"), dpi=150, bbox_inches='tight')
         plt.close(fig)
 
-        # Special events analysis
+        # --------- SPECIAL EVENTS PLOT ---------
         event_stats = (df
                     .groupby('event')
                     .agg(
@@ -316,6 +344,7 @@ def calendar_pipeline():
         fig.savefig(os.path.join(OUTPUT_DIR, "analisis_eventos.png"), dpi=150, bbox_inches='tight')
         plt.close(fig)
         return
+    
     @task()
     def load(transformed_path: str):
         log.info("Tarea Load alcanzada correctamente.")
