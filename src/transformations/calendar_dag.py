@@ -193,10 +193,12 @@ def calendar_pipeline():
 
         # Verify if availabe is bool tipe
         if not pd.api.types.is_bool_dtype(df['available']):
-            log.warning("Variable ")
+            log.warning("Variable available not transformed correctly")
 
         if not pd.api.types.is_datetime64_dtype(df['date']):
-            log.warning("Variable date ")
+            log.warning("Variable date not transformed correctly")
+    
+        return
 
         
     @task()
@@ -313,9 +315,7 @@ def calendar_pipeline():
         plt.tight_layout()
         fig.savefig(os.path.join(OUTPUT_DIR, "analisis_eventos.png"), dpi=150, bbox_inches='tight')
         plt.close(fig)
-
-        return transformed_path
-
+        return
     @task()
     def load(transformed_path: str):
         log.info("Tarea Load alcanzada correctamente.")
