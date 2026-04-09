@@ -48,7 +48,7 @@ def dag_reviews_analysis():
         # Drop rows with null comments and reviewer IDs
         df = df.dropna(subset=['comments', 'reviewer_id'])
         
-        # ---------- Adding Metadata ----------
+        # ---------- Adding New Data ----------
         df['comments_len'] = df['comments'].astype(str).apply(len)
         
         # ---------- Dropping Unnecessary Columns ----------
