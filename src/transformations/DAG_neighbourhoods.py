@@ -2,12 +2,15 @@ import pandas as pd
 import geopandas as gpd
 from airflow.decorators import task, dag
 from datetime import datetime
-import json
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+import os
+import io 
 
 # Rutas de archivos
-PATH_CSV = "../data/neighbourhoods.csv"
-PATH_GEOJSON = "../data/neighbourhoods.geojson"
-PATH_LISTINGS = "../data/listings.csv"
+PATH_CSV      = "/opt/airflow/data/neighbourhoods.csv"
+PATH_GEOJSON  = "/opt/airflow/data/neighbourhoods.geojson"
+PATH_LISTINGS = "/opt/airflow/data/listings.csv"
 
 @dag(
     schedule=None, 
@@ -19,109 +22,123 @@ def dag_neighbourhoods():
 
     @task()
     def extract():
-        #1. Extracción: Carga de archivos base
         df_neigh = pd.read_csv(PATH_CSV)
         gdf = gpd.read_file(PATH_GEOJSON)
-        # Cargamos listings solo con las columnas necesarias para enriquecer
         df_list = pd.read_csv(PATH_LISTINGS, usecols=["id", "neighbourhood", "price", "availability_365", "number_of_reviews", "room_type"])
 
-        extract_data = {
+        return {
             "df_neighbourhoods": df_neigh.to_json(),
             "gdf": gdf.to_json(),
             "df_listings": df_list.to_json()
         }
 
-        return extract_data
-
     @task()
     def transform(extract_data):
-        # 2. Limpieza: Eliminación de columnas irrelevantes
-        df_neighbourhoods = pd.read_json(extract_data["df_neighbourhoods"])
-        gdf = gpd.read_json(extract_data["gdf"])
+        df_neighbourhoods = pd.read_json(io.StringIO(extract_data["df_neighbourhoods"]))
+        gdf = gpd.read_file(io.StringIO(extract_data["gdf"]), driver='GeoJSON')
 
-        # Definimos la variable que tenemos con valores nulos (neighbourhood_group) basándola en proximidad geográfica dentro de Málaga
         GRUPOS_BARRIOS = {
             "Centro"   : ["Centro"],
             "Este"     : ["Este"],
-            "Oeste"    : ["Carretera de Cadiz", "Cruz De Humilladero", "Teatinos-Universidad"],
+            "Oeste"    : ["Carretera de Cadiz", "Cruz De Humilladero", "Teatinos-Universidad", "Churriana", "Campanillas", "Puerto de la Torre"],
             "Norte"    : ["Bailen-Miraflores", "Palma-Palmilla", "Ciudad Jardin"],
-            "Periferia": ["Churriana", "Campanillas", "Puerto de la Torre"],
         }
 
-        # Construir mapa (barrio: grupo)
-        mapa_barrio_grupo = {
-            barrio: grupo
-            for grupo, barrios in GRUPOS_BARRIOS.items()
-            for barrio in barrios
-        }
+        mapa_barrio_grupo = {barrio: grupo for grupo, barrios in GRUPOS_BARRIOS.items() for barrio in barrios}
 
-        # 4.2 Asignar neighbourhood_group al CSV y al GeoJSON 
-        df_neighbourhoods["neighbourhood_group"] = (
-            df_neighbourhoods["neighbourhood"].map(mapa_barrio_grupo)
-        )
+        df_neighbourhoods["neighbourhood_group"] = df_neighbourhoods["neighbourhood"].map(mapa_barrio_grupo)
+        gdf["neighbourhood_group"] = gdf["neighbourhood"].map(mapa_barrio_grupo)
 
-        gdf["neighbourhood_group"] = (
-            gdf["neighbourhood"].map(mapa_barrio_grupo)
-        )
-
-        data_cleaned = {
+        return {
             "df_neighbourhoods": df_neighbourhoods.to_json(),
             "gdf": gdf.to_json(),
             "df_listings": extract_data["df_listings"] 
         }
 
-        return data_cleaned
 
     @task()
     def enrichment(cleaned_data):
-        # Data enrichment
-        df_neighbourhoods = pd.read_json(cleaned_data["df_neighbourhoods"])
-        gdf = gpd.read_json(cleaned_data["gdf"])
-        df_listings = pd.read_json(cleaned_data["df_listings"])
+        df_neighbourhoods = pd.read_json(io.StringIO(cleaned_data["df_neighbourhoods"]))
+        gdf = gpd.read_file(io.StringIO(cleaned_data["gdf"]), driver='GeoJSON')
+        df_listings = pd.read_json(io.StringIO(cleaned_data["df_listings"]))
 
-        # 1. Lista de columnas que estamos añadiendo (para poder limpiar)
-        cols_enrichment = ['num_anuncios', 'precio_medio', 'disponibilidad_media', 'reviews_totales']
+        # Limpieza de precios
+        df_listings['price'] = df_listings['price'].replace(r'[\$,]', '', regex=True).astype(float)
 
-        # 3. Calculamos las estadísticas de listings
+        # Agregación
         stats_barrios = df_listings.groupby('neighbourhood').agg(
             num_anuncios=('id', 'count'),
-            precio_medio=('price', 'median'),
+            precio_medio=('price', 'mean'),
             disponibilidad_media=('availability_365', 'mean'),
             reviews_totales=('number_of_reviews', 'sum')
         ).reset_index()
 
-        # 4. Realizamos la unión (MERGE)
-        df_neighbourhoods_final = df_neighbourhoods.merge(stats_barrios, on='neighbourhood', how='left')
-        gdf_final = gdf.merge(stats_barrios, on='neighbourhood', how='left')
+        # Merges con limpieza de espacios
+        df_neighbourhoods['neighbourhood'] = df_neighbourhoods['neighbourhood'].str.strip()
+        gdf['neighbourhood'] = gdf['neighbourhood'].str.strip()
+        stats_barrios['neighbourhood'] = stats_barrios['neighbourhood'].str.strip()
 
-        data_enriched = {
-            "df_final": df_neighbourhoods_final.to_json(orient='records'),
+        df_final = df_neighbourhoods.merge(stats_barrios, on='neighbourhood', how='left').fillna(0)
+        gdf_final = gdf.merge(stats_barrios, on='neighbourhood', how='left').fillna(0)
+
+        # Reordenar
+        columnas = ['neighbourhood', 'neighbourhood_group', 'num_anuncios', 'precio_medio', 'disponibilidad_media', 'reviews_totales']
+        df_final = df_final[columnas].round(2)
+        gdf_final = gdf_final[columnas + ['geometry']].round(2)
+
+        return {
+            "df_final": df_final.to_json(orient='records'),
             "gdf_final": gdf_final.to_json()
         }
-
-        return data_enriched
     
     @task()
+    def eda(data_enriched):
+        PLOT_DIR = "/opt/airflow/data/eda_plots"
+        os.makedirs(PLOT_DIR, exist_ok=True)
+
+        df = pd.read_json(io.StringIO(data_enriched["df_final"]))
+        gdf = gpd.read_file(io.StringIO(data_enriched["gdf_final"]), driver='GeoJSON')
+
+        # 1. Mapa de barrios
+        COLORES = {"Centro": "#e63946", "Este": "#2a9d8f", "Oeste": "#e9c46a", "Norte": "#457b9d"}
+        gdf["color"] = gdf["neighbourhood_group"].map(COLORES)
+        fig, ax = plt.subplots(figsize=(10, 10))
+        gdf.plot(ax=ax, color=gdf["color"], edgecolor="white")
+        plt.savefig(os.path.join(PLOT_DIR, "1_mapa_grupos.png"))
+        plt.close(fig)
+
+        # 2. Top Caros
+        top = df.sort_values('precio_medio', ascending=False).head(15)
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.barh(top['neighbourhood'], top['precio_medio'], color='skyblue')
+        ax.invert_yaxis()
+        plt.savefig(os.path.join(PLOT_DIR, "2_top_caros.png"))
+        plt.close(fig)
+
+        # 3. Disponibilidad
+        fig, ax = plt.subplots(figsize=(10, 10))
+        gdf.plot(column='disponibilidad_media', cmap='RdYlGn_r', legend=True, ax=ax)
+        plt.savefig(os.path.join(PLOT_DIR, "3_disponibilidad.png"))
+        plt.close(fig)
+
+        # 4. Densidad
+        fig, ax = plt.subplots(figsize=(10, 10))
+        gdf.plot(column='num_anuncios', cmap='YlOrRd', legend=True, ax=ax)
+        plt.savefig(os.path.join(PLOT_DIR, "4_densidad.png"))
+        plt.close(fig)
+
+    @task()
     def load(final_data):
-        # 4. Carga: Persistencia y preparación para Kafka
-        # Recuperamos el DataFrame ya enriquecido
-        df = pd.read_json(final_data["df_final"])
-        
-        # Guardamos el CSV enriquecido
+        df = pd.read_json(io.StringIO(final_data["df_final"]))
         output_path = "../data/enriched_neighbourhoods.csv"
         df.to_csv(output_path, index=False)
-        
-        # Simulación de envío a Kafka (formato JSON línea a línea)
-        kafka_payload = df.to_json(orient='records')
-        
-        print(f"ÉXITO: {len(df)} barrios enriquecidos guardados en {output_path}.")
-        print("Payload listo para Kafka.")
+        print(f"ÉXITO: Guardado en {output_path}")
 
-    # Flujo de ejecución
-    raw = extract()
-    cleaned = transform(raw)
-    enriched = enrichment(cleaned)
-    load(enriched)
+    # Ejecución del Pipeline
+    data_raw = extract()
+    data_cleaned = transform(data_raw)
+    data_enriched = enrichment(data_cleaned)
+    eda(data_enriched)
+    load(data_enriched)
 
-# Ejecutar el DAG
 dag_instance = dag_neighbourhoods()
