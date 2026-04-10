@@ -251,7 +251,7 @@ def airbnb_master_pipeline():
                     ]
         df = apply_log1p_transformation(df, log_cols)
         # DUDAS
-        df['long_stay'] = (df['maximum_nights'] > 365).astype(int)
+        df['long_stay'] = (df['maximum_nights'] > 365).astype(bool)
         df = apply_clip(df, 'maximum_nights', upper_limit=365)
 
         # --------- BOOLEAN MAPPING ---------
