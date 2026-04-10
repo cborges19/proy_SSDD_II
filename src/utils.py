@@ -220,6 +220,7 @@ def apply_log1p_transformation(df, columns):
 def normalize_rates(df, columns):
     for col in columns:
         df[col] = df[col] / 100.0
+    return df
 
 # ==========================================
 # 4. FEATURE ENGINEERING

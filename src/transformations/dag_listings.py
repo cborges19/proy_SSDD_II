@@ -89,10 +89,12 @@ def airbnb_master_pipeline():
         # Response time imputation (mode) before using it as a grouping key for response rate
         df = impute_mode(df, 'host_response_time', 'host_is_superhost')
         df = impute_median_with_noise(df, 'host_response_rate', ['host_is_superhost', 'host_response_time'])
+        df = apply_clip(df, 'host_response_rate', 100, 0)
+        df = apply_clip(df, 'host_acceptance_rate', 100, 0)
 
         # Normalizing rates to [0, 1] range
         rate_cols = ['host_response_rate', 'host_acceptance_rate']
-        normalize_rates(df, rate_cols)
+        df = normalize_rates(df, rate_cols)
 
         # --------- DATE AND TIME NORMALIZATION ---------
         # Convert date strings to datetime objects for calculation
