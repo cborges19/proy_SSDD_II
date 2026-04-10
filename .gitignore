@@ -1,2 +1,15 @@
 .venv/
-data/
+data/raw/*.csv
+data/raw/*.geojson
+data/output/*
+airflow.cfg
+airflow.db
+airflow.db-shm
+airflow.db-wal
+simple_auth_manager_passwords.json.generated
+logs/
+# Ignorar todas las carpetas de caché de Python
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd

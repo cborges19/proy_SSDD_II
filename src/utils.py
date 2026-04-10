@@ -3,43 +3,96 @@ import numpy as np
 import re
 import json
 import ujson
-from datetime import datetime
+from datetime import datetime, timedelta
+import holidays
 from confluent_kafka import Producer, SerializingProducer
 from confluent_kafka.schema_registry import SchemaRegistryClient
 from confluent_kafka.schema_registry.avro import AvroSerializer
 
 import pathlib
+import tomllib
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
-DATA_DIR = PROJECT_ROOT / "data"
-OUTPUT_DIR = PROJECT_ROOT / "data" / "output"
-TEMPLATES_DIR = PROJECT_ROOT / "src" / "reports"
+with open(PROJECT_ROOT / "config.toml", "rb") as f:
+    config = tomllib.load(f)
+# ... usa config["kafka"]["bootstrap_servers"] en tus funciones
+
+DATA_DIR = PROJECT_ROOT / config["paths"]["data_dir"]
+OUTPUT_DIR = PROJECT_ROOT / config["paths"]["output_dir"]
+TEMPLATES_DIR = PROJECT_ROOT / config["paths"]["templates_dir"]
 
 # ==========================================
 # 1. KAFKA, AVRO & ERROR REPORTING
 # ==========================================
 
 def generate_avro_schema(df, record_name):
-    """Generates an Avro schema string from a Pandas DataFrame."""
-    type_mapping = {
-        'int64': 'long', 'int32': 'int', 'float64': 'double',
-        'float32': 'float', 'bool': 'boolean', 'datetime64[ns]': 'long',
-    }
+    """Generates an Avro schema string from a Pandas DataFrame with support for Arrays and Logical Types."""
     fields = []
     for col, dtype in df.dtypes.items():
-        avro_type = type_mapping.get(str(dtype), "string")
+        dtype_str = str(dtype)
+        
+        # --- COMPLEX TYPE DETECTION (Arrays) ---
+        if dtype_str == 'object':
+            # Check the first non-null value to determine if it's a list/array
+            sample = df[col].dropna().iloc[0] if not df[col].dropna().empty else None
+            if isinstance(sample, (list, np.ndarray)):
+                avro_type = {
+                    "type": "array",
+                    "items": "string"
+                }
+            else:
+                avro_type = "string"
+        
+        # --- LOGICAL TYPES (Timestamps) ---
+        elif 'datetime64' in dtype_str:
+            avro_type = {
+                "type": "long",
+                "logicalType": "timestamp-millis"
+            }
+            
+        # --- STANDARD PRIMITIVE TYPES ---
+        elif 'int64' in dtype_str:
+            avro_type = "long"
+        elif 'int32' in dtype_str:
+            avro_type = "int"
+        elif 'float' in dtype_str: # Catches float64 and float32
+            avro_type = "double"
+        elif 'bool' in dtype_str:
+            avro_type = "boolean"
+        else:
+            avro_type = "string"
+
+        # All fields are nullable by default for schema evolution robustness
         fields.append({"name": col, "type": ["null", avro_type], "default": None})
     
     schema_dict = {
-        "type": "record", "name": record_name,
-        "namespace": "com.airbnb.data", "fields": fields
+        "type": "record",
+        "name": record_name,
+        "namespace": "com.airbnb.data",
+        "fields": fields
     }
     return json.dumps(schema_dict)
 
-def produce_to_kafka_avro(file_path, topic, schema_regi stry_url, bootstrap_servers):
-    """Produces Parquet data to Kafka using Avro serialization."""
+def produce_to_kafka_avro(file_path, topic, 
+                          schema_registry_url=config["kafka"]["schema_registry_url"], 
+                          bootstrap_servers=config["kafka"]["bootstrap_servers"]):
+    """Produces Parquet data to Kafka after normalizing types for Avro serialization."""
     df = pd.read_parquet(file_path)
+
+    # --- DATA NORMALIZATION FOR AVRO COMPATIBILITY ---
+    for col in df.columns:
+        # Convert Timestamps to milliseconds (Avro long + logicalType)
+        if pd.api.types.is_datetime64_any_dtype(df[col]):
+            df[col] = df[col].astype('int64') // 10**6
+        
+        # Convert NumPy ndarrays to native Python lists
+        # Avro Serializer does not support numpy types natively
+        sample = df[col].dropna().iloc[0] if not df[col].dropna().empty else None
+        if isinstance(sample, np.ndarray):
+            df[col] = df[col].apply(lambda x: x.tolist() if isinstance(x, np.ndarray) else x)
+
+    # --- SCHEMA REGISTRY & PRODUCER SETUP ---
     avro_schema_str = generate_avro_schema(df, topic)
     sr_client = SchemaRegistryClient({'url': schema_registry_url})
     avro_serializer = AvroSerializer(sr_client, avro_schema_str)
@@ -52,11 +105,18 @@ def produce_to_kafka_avro(file_path, topic, schema_regi stry_url, bootstrap_serv
     }
     producer = SerializingProducer(producer_conf)
 
-    for _, row in df.iterrows():
-        producer.produce(topic=topic, value=row.to_dict())
+    # --- STREAMING RECORDS WITH NULL HANDLING ---
+    # We use .replace({np.nan: None}) to ensure Pandas NaNs become Python None
+    # which matches Avro's 'null' type perfectly.
+    records = df.replace({np.nan: None}).to_dict('records')
+    for row in records:
+        # Values are already cleaned and match the generated schema
+        producer.produce(topic=topic, value=row)
+        producer.poll(0)
+    
     producer.flush()
 
-def produce_error_to_kafka(variable, message, bootstrap_servers='kafka:9092'):
+def produce_error_to_kafka(variable, message, bootstrap_servers=config["kafka"]["bootstrap_servers"]):
     """Sends a JSON error payload to the pipeline_errors topic (DLQ)."""
     producer = Producer({'bootstrap.servers': bootstrap_servers})
     payload = {
@@ -83,7 +143,7 @@ def clean_currency(series):
 
 def map_airbnb_bool(df, columns):
     """Maps Airbnb 't'/'f' to Python Booleans."""
-    mapping = {'t': True, 'f': False, True: True, False: False}
+    mapping = {'t': True, 'f': False, True: True, False: False, 1: True, 0: False}
     for col in columns:
         if col in df.columns: df[col] = df[col].map(mapping)
     return df
@@ -157,6 +217,10 @@ def apply_log1p_transformation(df, columns):
         if col in df.columns: df[f'{col}_log'] = np.log1p(df[col])
     return df
 
+def normalize_rates(df, columns):
+    for col in columns:
+        df[col] = df[col] / 100.0
+
 # ==========================================
 # 4. FEATURE ENGINEERING
 # ==========================================
@@ -172,8 +236,17 @@ def parse_amenities(amenities_str):
     except: return []
 
 def get_ohe_from_list_column(df, col, prefix):
-    """Expands list-like strings into One-Hot Encoded columns."""
-    dummies = df[col].astype(str).str.replace(r"[\[\]\']", "", regex=True).str.get_dummies(sep=', ')
+    """Expands list-like strings into One-Hot Encoded columns, avoiding empty categories."""
+    # Clean characters and strip potential leading/trailing spaces
+    clean_series = df[col].astype(str).str.replace(r"[\[\]\']", "", regex=True).str.strip()
+    
+    # Generate dummies
+    dummies = clean_series.str.get_dummies(sep=', ').astype(bool)
+    
+    # Remove the empty string column if it was generated from empty lists
+    if "" in dummies.columns:
+        dummies = dummies.drop(columns=[""])
+        
     return pd.concat([df, dummies.add_prefix(f"{prefix}_")], axis=1)
 
 def calculate_days_since(df, date_col, reference_date=None):
@@ -193,6 +266,42 @@ def haversine_distance(lat1, lon1, lat2, lon2):
     c = 2 * np.arcsin(np.sqrt(a))
     return R * c
 
+def get_event(date):
+    """
+    Categorizes a given date into specific seasonal events or holidays, 
+    including Easter (Semana Santa), Málaga's Fair, and summer periods.
+
+    Args:
+        date (datetime or pd.Timestamp): The date to be categorized.
+
+    Returns:
+        str: The name of the detected event (e.g., 'Semana Santa', 'Feria de Málaga', 
+            'Verano') or 'Temporada normal' if no special event is matched.
+    """
+    year = date.year
+    holiday_es = holidays.Spain(years=year, subdiv='AN')
+    easter = [d for d, name in holiday_es.items() if 'Viernes Santo' in name]
+    
+    if easter:
+        viernes_santo = pd.Timestamp(easter[0])
+        ramos = viernes_santo - pd.Timedelta(days=7)
+        if ramos <= date <= viernes_santo + pd.Timedelta(days=1):
+            return 'Semana Santa'
+        
+    if pd.Timestamp(f'{year}-08-15') <= date <= pd.Timestamp(f'{year}-08-22'): 
+        return 'Feria de Málaga'
+    
+    if date.month == 6 and date.day == 23:
+        return 'Noche de San Juan'
+    
+    if date.month in [6, 7, 8]:
+        return 'Verano'
+    
+    if (date.month == 12 and date.day >= 20) or (date.month == 1 and date.day <= 6):
+        return 'Navidad/Reyes'
+    
+    return 'Temporada normal'
+
 # ==========================================
 # 5. VALIDATION ENGINE
 # ==========================================
@@ -205,8 +314,8 @@ def validate_and_report(df, rules):
         if check == 'range':
             min_v, max_v = rule.get('params')
             mask = pd.Series(False, index=df.index)
-            if min_v is not None: mask |= (df[col] < min_v)
-            if max_v is not None: mask |= (df[col] > max_v)
+            if min_v is not None: mask |= (df[col] <= min_v)
+            if max_v is not None: mask |= (df[col] >= max_v)
             failed = mask.any()
         elif check == 'unique': failed = df[col].duplicated().any()
         elif check == 'category': failed = (~df[col].isin(rule.get('params'))).any()

@@ -98,7 +98,7 @@
         <div>
             <h1>Airbnb <span>Málaga</span> — EDA Report</h1>
             <div style="margin-top:8px;font-size:.82rem;color:var(--muted)">
-            Datos scrapeados al 30 sep 2025 · Generado por Apache Airflow
+            Datos enriquecidos al 30 sep 2025 · Generado por Apache Airflow
             </div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-left:auto" id="badges"></div>
@@ -107,86 +107,90 @@
         <div class="section-title">Resumen del dataset</div>
         <div class="grid grid-4" id="kpis"></div>
 
-        <div class="section-title">Distribución de precios</div>
+        <div class="section-title">Enriquecimiento & Geo-Insights</div>
+        <div class="grid grid-4">
+            <div class="card accent-green">
+                <div class="kpi-label">Anfitriones Locales</div>
+                <div class="kpi-value" id="valHostNear">0</div>
+                <div class="kpi-sub">Zona Málaga / Provincia</div>
+            </div>
+            <div class="card accent-blue">
+                <div class="kpi-label">Núcleo Urbano</div>
+                <div class="kpi-value" id="valUrbanCore">0</div>
+                <div class="kpi-sub">Radio &lt;= 2.0 km del centro</div>
+            </div>
+            <div class="card accent-purple">
+                <div class="kpi-label">Larga Estancia</div>
+                <div class="kpi-value" id="valLongStay">0%</div>
+                <div class="kpi-sub">Permiten &gt; 365 noches</div>
+            </div>
+            <div class="card accent-teal">
+                <div class="kpi-label">Nuevas Variables</div>
+                <div class="kpi-value">+8</div>
+                <div class="kpi-sub">Métricas de Enrichment</div>
+            </div>
+        </div>
+
+        <div class="section-title">Análisis Avanzado de Precios</div>
         <div class="grid grid-2">
             <div class="card accent-red">
-                <div class="chart-title">Precio por noche (€) — clip &lt;500 | histograma</div>
+                <div class="chart-title">Distribución Logarítmica (Normalizada)</div>
+                <canvas id="chartPriceLog" height="160"></canvas>
+            </div>
+            <div class="card accent-amber">
+                <div class="chart-title">Precio Mediano vs Distancia al Centro</div>
+                <canvas id="chartGeoTrend" height="160"></canvas>
+            </div>
+        </div>
+
+        <div class="grid grid-2">
+            <div class="card accent-red">
+                <div class="chart-title">Precio por noche (€) — clip &lt;500</div>
                 <canvas id="chartPrice" height="160"></canvas>
             </div>
             <div class="card accent-amber">
-                <div class="chart-title">Precio mediano por barrio (top 15, mín 10 listings)</div>
+                <div class="chart-title">Precio mediano por barrio (top 15)</div>
                 <canvas id="chartNeigh" height="160"></canvas>
             </div>
         </div>
 
-        <div class="section-title">Tipo de alojamiento y anfitriones</div>
+        <div class="section-title">Segmentación & Localización</div>
         <div class="grid grid-3">
             <div class="card accent-blue">
-                <div class="chart-title">Tipo de habitación</div>
-                <canvas id="chartRoom" height="180"></canvas>
+                <div class="chart-title">Origen del Anfitrión (host_location)</div>
+                <canvas id="chartLocCat" height="180"></canvas>
             </div>
             <div class="card accent-purple">
                 <div class="chart-title">Segmento de anfitrión</div>
                 <canvas id="chartSeg" height="180"></canvas>
             </div>
             <div class="card accent-green">
-                <div class="chart-title">Superhost vs Regular — precio mediano (€)</div>
-                <div class="superhost-row" id="superhostRow"></div>
+                <div class="chart-title">Tipo de Habitación</div>
+                <canvas id="chartRoom" height="180"></canvas>
             </div>
         </div>
 
-        <div class="section-title">Reviews y disponibilidad</div>
+        <div class="section-title">Calidad de datos & Correlaciones</div>
         <div class="grid grid-2">
-            <div class="card accent-teal">
-                <div class="chart-title">Distribución puntuación media (review_scores_rating)</div>
-                <canvas id="chartRating" height="160"></canvas>
-            </div>
-            <div class="card accent-blue">
-                <div class="chart-title">Disponibilidad anual (días / año)</div>
-                <canvas id="chartAvail" height="160"></canvas>
-            </div>
-        </div>
-
-        <div class="section-title">Geografía y comodidades</div>
-        <div class="grid grid-2">
-            <div class="card accent-amber">
-                <div class="chart-title">Distancia al centro de Málaga (km)</div>
-                <canvas id="chartDist" height="160"></canvas>
-            </div>
-            <div class="card accent-purple">
-                <div class="chart-title">Top 20 amenities más frecuentes</div>
-                <canvas id="chartAmen" height="160"></canvas>
-            </div>
-        </div>
-
-        <div class="section-title">Calidad de datos — nulos (%)</div>
-        <div class="grid grid-1">
             <div class="card">
-                <div class="chart-title">Top 20 columnas con más valores nulos</div>
+                <div class="chart-title">Top Columnas con Nulos</div>
                 <div id="nullBars"></div>
             </div>
-        </div>
-
-        <div class="section-title">Correlaciones entre variables numéricas</div>
-        <div class="grid grid-1">
             <div class="card accent-teal">
-                <div class="chart-title">Matriz de correlación de Pearson</div>
+                <div class="chart-title">Matriz de Correlación (Pearson)</div>
                 <div id="corrMatrix" style="overflow-x:auto"></div>
             </div>
         </div>
     </main>
-    <footer>Pipeline: extract → transform → enrichment → <strong>eda_report</strong> → load</footer>
+    <footer>Pipeline: extract → transform → <strong>enrichment</strong> → <strong>eda_report</strong> → load</footer>
 
     <script>
-    // Inyección de datos mediante Jinja2
-    const RAW = {{ payload | safe }};
-    const D = RAW;
+    const D = {{ payload | safe }};
 
-    // ── Palette ────────────────────────────────────────────────────────────────
     const C = {
-        red:    '#ff5a5f', blue:   '#4e9af1', green:  '#43c78a',
-        amber:  '#f5a623', purple: '#9b7ee8', teal:   '#2eccc4',
-        muted:  '#8b8fa8', grid:   '#2a2d3a', text:   '#e8eaf0',
+        red: '#ff5a5f', blue: '#4e9af1', green: '#43c78a',
+        amber: '#f5a623', purple: '#9b7ee8', teal: '#2eccc4',
+        muted: '#8b8fa8', grid: '#2a2d3a', text: '#e8eaf0',
     };
 
     Chart.defaults.color = C.muted;
@@ -198,137 +202,86 @@
         return `rgba(${r},${g},${b},${a})`;
     }
 
-    // ── KPIs ───────────────────────────────────────────────────────────────────
+    // ── Enriched KPIs ──────────────────────────────────────────────────────────
+    document.getElementById('valHostNear').innerText = D.enrichment.host_near['Local (Málaga)'].toLocaleString('es');
+    document.getElementById('valUrbanCore').innerText = D.enrichment.urban_core['Center (<=2km)'].toLocaleString('es');
+    document.getElementById('valLongStay').innerText = D.enrichment.long_stay_pct + '%';
+
     const kpiData = [
-        { label:'Listings',      value: D.meta.rows.toLocaleString('es'), sub:'registros totales', accent:'red'   },
-        { label:'Columnas',      value: D.meta.cols,                      sub:`${D.meta.num} numéricas · ${D.meta.cat} categóricas`, accent:'blue'   },
-        { label:'Precio medio',  value:`€${D.price.mean}`,              sub:`mediana €${D.price.median} · p95 €${D.price.p95}`, accent:'amber'  },
-        { label:'Rating medio',  value: D.rating.mean ?? '—',             sub:'review_scores_rating', accent:'green'  },
+        { label:'Listings', value: D.meta.rows.toLocaleString('es'), sub:'registros totales', accent:'red' },
+        { label:'Variables', value: D.meta.cols, sub:'pipeline enriquecido', accent:'blue' },
+        { label:'Precio mediano', value: `€${D.price.median}`, sub: `media €${D.price.mean}`, accent:'amber' }
     ];
     const badges = document.getElementById('badges');
-    kpiData.forEach(k => {
-        badges.insertAdjacentHTML('beforeend', `<span class="badge"><b>${k.value}</b> ${k.label}</span>`);
-    });
+    kpiData.forEach(k => badges.insertAdjacentHTML('beforeend', `<span class="badge"><b>${k.value}</b> ${k.label}</span>`));
     const kpis = document.getElementById('kpis');
-    kpiData.forEach(k => {
-        kpis.insertAdjacentHTML('beforeend', `
-            <div class="card accent-${k.accent}">
-                <div class="kpi-label">${k.label}</div>
-                <div class="kpi-value">${k.value}</div>
-                <div class="kpi-sub">${k.sub}</div>
-            </div>`);
-    });
+    kpiData.forEach(k => kpis.insertAdjacentHTML('beforeend', `
+        <div class="card accent-${k.accent}"><div class="kpi-label">${k.label}</div><div class="kpi-value">${k.value}</div><div class="kpi-sub">${k.sub}</div></div>`));
 
-    // ── Helpers chart ──────────────────────────────────────────────────────────
-    function barChart(id, labels, data, color, opts={} ) {
+    // ── Helper Charts ──────────────────────────────────────────────────────────
+    function barChart(id, labels, data, color) {
         return new Chart(document.getElementById(id), {
             type:'bar',
-            data:{ labels, datasets:[{data, backgroundColor:rgba(color,.7), borderColor:color,
-            borderWidth:1, borderRadius:3, borderSkipped:false }] },
-            options:{ plugins:{legend:{display:false}}, scales:{
-            x:{grid:{color:C.grid}, ticks:{maxRotation:45, font:{size:9}}},
-            y:{grid:{color:C.grid}, ticks:{font:{size:9}}}
-            }, ...opts }
+            data:{ labels, datasets:[{data, backgroundColor:rgba(color,.7), borderColor:color, borderWidth:1, borderRadius:3}] },
+            options:{ plugins:{legend:{display:false}}, scales:{ x:{ticks:{maxRotation:45, font:{size:9}}}, y:{ticks:{font:{size:9}}}} }
         });
     }
-    function hbarChart(id, labels, data, color) {
+    function lineChart(id, labels, data, color) {
         return new Chart(document.getElementById(id), {
-            type:'bar',
-            data:{ labels, datasets:[{data, backgroundColor:rgba(color,.7), borderColor:color,
-            borderWidth:1, borderRadius:3, borderSkipped:false }] },
-            options:{
-                indexAxis:'y',
-                plugins:{legend:{display:false}},
-                scales:{
-                    x:{grid:{color:C.grid}, ticks:{font:{size:9}}},
-                    y:{grid:{color:'transparent'}, ticks:{font:{size:9}}}
-                }
-            }
+            type:'line',
+            data:{ labels, datasets:[{data, borderColor:color, backgroundColor:rgba(color,.1), fill:true, tension:0.4}] },
+            options:{ plugins:{legend:{display:false}}, scales:{ x:{ticks:{font:{size:9}}}, y:{ticks:{font:{size:9}}}} }
         });
     }
     function doughnut(id, labels, data, colors) {
         return new Chart(document.getElementById(id), {
             type:'doughnut',
-            data:{ labels, datasets:[{data, backgroundColor:colors, borderColor:'#1a1d27', borderWidth:2}] },
-            options:{ plugins:{legend:{position:'right', labels:{font:{size:10}, padding:8}}},
-            cutout:'60%' }
+            data:{ labels, datasets:[{data, backgroundColor:colors, borderWidth:0}] },
+            options:{ plugins:{legend:{position:'right', labels:{font:{size:10}}}}, cutout:'70%' }
         });
     }
 
-    // ── Charts ─────────────────────────────────────────────────────────────────
+    // ── Rendering Charts ───────────────────────────────────────────────────────
     barChart('chartPrice', D.price.bins.map(v=>v.toFixed(0)), D.price.counts, C.red);
-
+    barChart('chartPriceLog', D.price.log_bins.map(v=>v.toFixed(1)), D.price.log_counts, C.blue);
+    lineChart('chartGeoTrend', D.geo_trend.labels, D.geo_trend.data, C.amber);
+    
     if (D.neigh_price && D.neigh_price.neighbourhood_cleansed) {
-        hbarChart('chartNeigh', D.neigh_price.neighbourhood_cleansed, D.neigh_price.median_price, C.amber);
+        const ctx = document.getElementById('chartNeigh');
+        new Chart(ctx, { type:'bar', data:{ labels: D.neigh_price.neighbourhood_cleansed, datasets:[{data: D.neigh_price.median_price, backgroundColor:rgba(C.amber,.7)}] }, options:{ indexAxis:'y', plugins:{legend:{display:false}}} });
     }
 
-    const roomKeys = Object.keys(D.room_type);
-    doughnut('chartRoom', roomKeys, roomKeys.map(k=>D.room_type[k]), [C.blue, C.teal, C.purple, C.green]);
-
-    const segKeys = Object.keys(D.host_segment);
-    doughnut('chartSeg', segKeys, segKeys.map(k=>D.host_segment[k]), [C.purple, C.amber, C.red]);
-
-    barChart('chartRating', D.rating.bins.map(v=>v.toFixed(2)), D.rating.counts, C.teal);
-    barChart('chartAvail', D.availability.bins.map(v=>v.toString()), D.availability.counts, C.blue);
-    barChart('chartDist', D.distance.bins.map(v=>v.toFixed(1)), D.distance.counts, C.amber);
-    hbarChart('chartAmen', D.amenities.names, D.amenities.counts, C.purple);
-
-    // ── Superhost ──────────────────────────────────────────────────────────────
-    const shRow = document.getElementById('superhostRow');
-    [['Superhost', C.green], ['Regular', C.muted]].forEach(([key, col]) => {
-        const d = D.superhost[key] ?? {};
-        shRow.insertAdjacentHTML('beforeend', `
-            <div class="superhost-card">
-                <div class="sh-label">${key}</div>
-                <div class="sh-price" style="color:${col}">€${d.median ?? '—'}</div>
-                <div class="sh-n">n=${(d.n??0).toLocaleString('es')} · media €${d.mean??'—'}</div>
-            </div>`);
-    });
+    doughnut('chartLocCat', Object.keys(D.enrichment.location_cats), Object.values(D.enrichment.location_cats), [C.green, C.blue, C.purple, C.muted]);
+    doughnut('chartSeg', Object.keys(D.host_segment), Object.values(D.host_segment), [C.purple, C.amber, C.red]);
+    doughnut('chartRoom', Object.keys(D.room_type), Object.values(D.room_type), [C.blue, C.teal, C.purple]);
 
     // ── Null bars ──────────────────────────────────────────────────────────────
     const nullWrap = document.getElementById('nullBars');
-    D.null_data.cols.forEach((col, i) => {
-        const pct = D.null_data.pct[i];
-        const color = pct > 50 ? C.red : pct > 20 ? C.amber : C.teal;
+    D.null_data.forEach(([col, pct]) => {
         nullWrap.insertAdjacentHTML('beforeend', `
             <div class="null-bar-wrap">
                 <div class="null-col-name">${col}</div>
-                <div class="null-bar-bg"><div class="null-bar-fill" style="width:${pct}%;background:${color}"></div></div>
+                <div class="null-bar-bg"><div class="null-bar-fill" style="width:${pct}%;background:${pct>50?C.red:C.teal}"></div></div>
                 <div class="null-pct">${pct}%</div>
             </div>`);
     });
 
-    // ── Correlation heatmap ────────────────────────────────────────────────────
+    // ── Correlation ────────────────────────────────────────────────────────────
     (function() {
         const { labels, matrix } = D.corr;
-        if(!labels) return;
         const n = labels.length;
         const wrap = document.getElementById('corrMatrix');
-        wrap.style.setProperty('--cols', n + 1);
-
-        let htmlGrid = `<div class="corr-grid" style="--cols:${n+1}">`;
-        htmlGrid += `<div></div>`;
+        let htmlGrid = `<div class="corr-grid" style="--cols:${n+1}"><div></div>`;
         labels.forEach(l => htmlGrid += `<div class="corr-header">${l.replace(/_/g,' ')}</div>`);
         labels.forEach((row, i) => {
             htmlGrid += `<div class="corr-label">${row.replace(/_/g,' ')}</div>`;
             matrix[i].forEach((val, j) => {
-                const v = val === null ? 0 : val;
-                const abs = Math.abs(v);
-                let bg, fg;
-                if (i === j) { bg = '#2a2d3a'; fg = C.muted; }
-                else if (v > 0) {
-                    bg = `rgba(78,154,241,${0.1 + abs*0.75})`;
-                    fg = abs > 0.5 ? '#fff' : C.muted;
-                } else {
-                    bg = `rgba(255,90,95,${0.1 + abs*0.75})`;
-                    fg = abs > 0.5 ? '#fff' : C.muted;
-                }
-                const disp = val === null ? '' : v.toFixed(2);
-                htmlGrid += `<div class="corr-cell" style="background:${bg};color:${fg}">${disp}</div>`;
+                const abs = Math.abs(val);
+                const bg = val > 0 ? `rgba(78,154,241,${0.1 + abs*0.7})` : `rgba(255,90,95,${0.1 + abs*0.7})`;
+                htmlGrid += `<div class="corr-cell" style="background:${bg}">${val.toFixed(2)}</div>`;
             });
         });
-        htmlGrid += '</div>';
-        wrap.innerHTML = htmlGrid;
+        wrap.innerHTML = htmlGrid + '</div>';
     })();
     </script>
 </body>

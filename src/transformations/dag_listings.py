@@ -15,12 +15,12 @@ from src.utils import *
 from src.utils import DATA_DIR, OUTPUT_DIR, TEMPLATES_DIR
 
 
-TEMPLATE_PATH = TEMPLATES_DIR / "report_calendar.html"
-output_dir = str(OUTPUT_DIR / "reports" / "calendar")
+TEMPLATE_PATH = TEMPLATES_DIR / "report_listings.html"
+output_dir = str(OUTPUT_DIR / "reports" / "listings")
 
 @dag(
     start_date=datetime(2026, 4, 9),
-    schedule_interval='@daily',
+    schedule=None,
     catchup=False,
     tags=['airbnb', 'listings', 'gold_layer', 'production']
 )
@@ -39,39 +39,48 @@ def airbnb_master_pipeline():
     # ---------------------------------------------------------
     @task
     def transform_data(file_path: str):
+        # Access Airflow's internal task logger
+        log = logging.getLogger("airflow.task") 
         df = pd.read_parquet(file_path)
 
         # --------- PROPERTY TYPE TRANSLATION ---------
         # Translate specific Spanish property types to English
+        log.info("Translating property types to English")
         df = translate_values(df, 'property_type', {'Casa Particular': 'Private House'})
 
         # --------- BATHROOMS DATA EXTRACTION ---------
         # Extract numeric value from the text description of bathrooms
+        log.info("Extracting numeric bathroom counts from text descriptions")
         df['bathrooms'] = parse_numeric_from_text(df['bathrooms_text'])
 
         # --------- MANUAL BATHROOM NULL IMPUTATION ---------
         # Fix specific IDs where bathrooms were identified manually
+        log.info("Applying manual fixes for bathroom outliers by listing ID")
         df = manual_impute_by_id(df, 'id', [907846578011191658], 'bathrooms', 1.0)
         df = manual_impute_by_id(df, 'id', [1071778548709501720, 1149444780882723841, 
                                            1199390966969605315, 1209436626693592917], 'bathrooms', 0.0)
 
         # --------- BEDROOMS INITIAL IMPUTATION ---------
         # Shared or Private rooms are assumed to have at least 1 bedroom
+        log.info("Imputing missing bedrooms using room type logic and median")
         room_mask = df['room_type'].isin(['Shared room', 'Private room']) & df['bedrooms'].isna()
         df.loc[room_mask, 'bedrooms'] = 1.0
-        df = impute_median_with_noise(df, 'bedrooms', 'accommodates')
+        df = impute_median(df, 'bedrooms', 'accommodates')
 
         # --------- BEDS MEDIAN IMPUTATION ---------
         # Fill missing bed counts using the median grouped by accommodates
+        log.info("Imputing missing beds using median grouped by accommodates")
         df = impute_median(df, 'beds', 'accommodates')
 
         # --------- CURRENCY AND PRICE CLEANING ---------
         # Clean currency symbols and fix specific outlier ID 47444051
+        log.info("Cleaning currency symbols and normalizing price values")
         df = manual_impute_by_id(df, 'id', [47444051], 'price', "182.0")
         df['price'] = clean_currency(df['price'])
 
         # --------- HOST RATES CLEANING & IMPUTATION ---------
         # Clean rates strings to numerical floats
+        log.info("Cleaning and imputing host response/acceptance rates")
         df['host_response_rate'] = clean_currency(df['host_response_rate'])
         df['host_acceptance_rate'] = clean_currency(df['host_acceptance_rate'])
         
@@ -81,8 +90,13 @@ def airbnb_master_pipeline():
         df = impute_mode(df, 'host_response_time', 'host_is_superhost')
         df = impute_median_with_noise(df, 'host_response_rate', ['host_is_superhost', 'host_response_time'])
 
+        # Normalizing rates to [0, 1] range
+        rate_cols = ['host_response_rate', 'host_acceptance_rate']
+        normalize_rates(df, rate_cols)
+
         # --------- DATE AND TIME NORMALIZATION ---------
         # Convert date strings to datetime objects for calculation
+        log.info("Converting host and review columns to datetime objects")
         df['host_since'] = pd.to_datetime(df['host_since'], errors='coerce')
         df['last_review'] = pd.to_datetime(df['last_review'], errors='coerce')
         df['first_review'] = pd.to_datetime(df['first_review'], errors='coerce')
@@ -93,6 +107,7 @@ def airbnb_master_pipeline():
             'host_is_superhost', 'host_has_profile_pic', 
             'host_identity_verified', 'has_availability', 'instant_bookable'
         ]
+        log.info(f"Mapping Airbnb 't'/'f' to boolean for columns: {bool_cols}")
         df = map_airbnb_bool(df, bool_cols)
 
         output_path = "/tmp/listings_transformed.parquet"
@@ -104,10 +119,13 @@ def airbnb_master_pipeline():
     # ---------------------------------------------------------
     @task
     def enrichment_data(file_path: str):
+        # Access Airflow's internal task logger
+        log = logging.getLogger("airflow.task")
         df = pd.read_parquet(file_path)
 
         # --------- BATHROOM SHARED FEATURE ---------
         # Create flag if 'shared' appears in text and bathroom count is relevant
+        log.info("Applying heuristic imputation for superhost status and shared bathroom flags")
         df['bathroom_shared'] = binarize_by_keywords(df['bathrooms_text'], 'shared|compartido')
 
         # --------- SUPERHOST HEURISTIC IMPUTATION ---------
@@ -121,11 +139,13 @@ def airbnb_master_pipeline():
         df['host_is_superhost'] = df['host_is_superhost'].fillna(superhost_logic)
 
         # --------- AMENITIES COUNT AND PARSING ---------
+        log.info("Parsing amenities list and calculating feature counts")
         df['amenities_list'] = df['amenities'].apply(parse_amenities)
         df['num_amenities'] = df['amenities_list'].apply(len)
 
         # --------- HOST LISTINGS CALCULATIONS ---------
         # Calculate hotel room count and host-specific listing metrics
+        log.info("Identifying professional agencies and calculating host proximity to Malaga")
         df['host_listings_count_hr'] = (
             df['calculated_host_listings_count'] - (
                 df.get('calculated_host_listings_count_entire_homes', 0) + 
@@ -150,15 +170,18 @@ def airbnb_master_pipeline():
         df['host_near'] = (df['host_location_cat'] == 'Malaga').astype(int)
 
         # --------- NEIGHBOURHOOD CENTER ANALYSIS ---------
+        log.info("Flagging listings located in historical or central neighborhoods")
         df['neighbourhood_center'] = binarize_by_keywords(df['neighbourhood_cleansed'], 'centro|histórico|soho')
         df['description'] = df['description'].apply(clean_text_nlp)
 
         # --------- REVENUE AND AVAILABILITY LOGIC ---------
+        log.info("Estimating annual revenue (L365D/N365D) based on occupancy and price")
         df['has_availability'] = df['has_availability'].fillna(df['availability_365'] > 0)
         df['estimated_revenue_l365d'] = (df['price'] * (df['estimated_occupancy_l365d'])).clip(lower=0)
         df['estimated_revenue_n365d'] = (df['price'] * (365 - df['availability_365'])).clip(lower=0)
 
         # --------- REVIEW RECENCY AND COUNTS ---------
+        log.info("Calculating review recency metrics and filling missing counts")
         df['has_review'] = (df['number_of_reviews'] > 0).astype(int)
         df['has_review_ly'] = (df['last_review'].dt.year == 2025).astype(int)
         df['reviews_per_month'] = df['reviews_per_month'].fillna(0)
@@ -166,7 +189,8 @@ def airbnb_master_pipeline():
 
         # --------- HOST VERIFICATIONS OHE ---------
         # Expand verification list into multiple binary columns
-        df = get_ohe_from_list_column(df, 'host_verifications', 'verif')
+        log.info("Expanding host verifications into one-hot encoded binary columns")
+        df = get_ohe_from_list_column(df, 'host_verifications', 'host_verif')
 
         # --------- GEOSPATIAL ANALYSIS (HAVERSINE) ---------
         # Accurate distance to Malaga Center (36.7213, -4.4214)
@@ -188,13 +212,24 @@ def airbnb_master_pipeline():
         # --------- HOST SEGMENTATION (3 LEVELS) ---------
         def segment_host(count):
             if count == 1: return 'Individual'
-            if count <= 5: return 'Small_Investor'
+            if count < 5: return 'Small_Investor'
             return 'Agency'
         
         # Use the original column before renaming
         df['host_segment'] = df['calculated_host_listings_count'].apply(segment_host)
 
+        # Standardize Airbnb 't'/'f' strings into Python boolean types
+        bool_cols = [
+            'host_is_superhost', 'host_has_profile_pic', 
+            'host_identity_verified', 'has_availability', 'instant_bookable'
+        ]
+        log.info(f"Mapping Airbnb 't'/'f' to boolean for columns: {bool_cols}")
+        df = map_airbnb_bool(df, bool_cols)
+
         # --------- VARIABLE RENAMING ---------
+        # Before rename every columns, we need to drop the column host_listings_count, to avoid duplicated columns
+        df = df.drop('host_listings_count', axis=1)
+
         # Rename specific columns to match business terminology
         rename_map = {
             'host_response_time': 'host_response_hour',
@@ -208,15 +243,39 @@ def airbnb_master_pipeline():
         df['host_response_hour'] = binarize_by_keywords(df['host_response_hour'], 'within an hour')
 
         # --------- LOG TRANSFORMATIONS & CLIPPING ---------
+        log.info("Applying log1p transformations to skewed variables and clipping outliers")
         log_cols = ['price', 'estimated_revenue_l365d', 'estimated_revenue_n365d', 
-                    'minimum_nights', 'number_of_reviews', 'host_listings_count']
+                    'minimum_nights', 'number_of_reviews', 'number_of_reviews_ltm',
+                    'number_of_reviews_l30d', 'number_of_reviews_ly', 'host_listings_count',
+                    'host_listings_count_eh', 'host_listings_count_sr', 'host_listings_count_pr',
+                    ]
         df = apply_log1p_transformation(df, log_cols)
+        # DUDAS
         df['long_stay'] = (df['maximum_nights'] > 365).astype(int)
         df = apply_clip(df, 'maximum_nights', upper_limit=365)
 
+        # --------- BOOLEAN MAPPING ---------
+        # Standardize boolean variables
+        bool_cols = [
+            'host_response_hour', 'bathroom_shared', 
+            'company', 'host_near', 'long_stay'
+        ]
+        log.info(f"Mapping to boolean for columns: {bool_cols}")
+        df = map_airbnb_bool(df, bool_cols)
+
         # --------- FINAL COLUMN CLEANUP ---------
-        drop_cols = ['property_type', 'bathrooms_text', 'scrape_id', 'source', 'picture_url', 
-                     'license', 'calendar_updated', 'neighbourhood', 'neighbourhood_group_cleansed']
+        log.info("Performing final column cleanup and business terminology renaming")
+        drop_cols = [
+            'scrape_id', 'host_thumbnail_url', 'host_picture_url', 
+            'minimum_minimum_nights', 'maximum_minimum_nights', 
+            'minimum_maximum_nights', 'maximum_maximum_nights',
+            'minimum_nights_avg_ntm', 'maximum_nights_avg_ntm',
+            'host_about', 'host_url', 'host_neighbourhood',
+            'neighborhood_overview', 'neighbourhood', 'neighbourhood_group_cleansed', 
+            'calendar_updated','bathrooms_text','source','picture_url','license',
+            'last_scraped','calendar_last_scraped', 'property_type',
+            'name', 'listing_url', 'host_location', 'host_verifications', 'amenities'
+        ]
         df = df.drop(columns=[c for c in drop_cols if c in df.columns])
 
         output_path = "/tmp/listings_enriched.parquet"
@@ -228,6 +287,8 @@ def airbnb_master_pipeline():
     # ---------------------------------------------------------
     @task
     def validate_data(file_path: str):
+        # Access Airflow's internal task logger
+        log = logging.getLogger("airflow.task")
         df = pd.read_parquet(file_path)
 
         # --------- DATA QUALITY RULES LIST ---------
@@ -281,10 +342,9 @@ def airbnb_master_pipeline():
     # ---------------------------------------------------------
     @task
     def generate_eda_report(file_path: str):
-        # --------- ENRICHED LISTINGS VISUAL ANALYSIS ---------
         # Access Airflow's internal task logger
         log = logging.getLogger("airflow.task")
-        
+        # --------- ENRICHED LISTINGS VISUAL ANALYSIS ---------        
         # Define specific report storage path
         output_dir = "data/output/reports/listings"
         
@@ -300,8 +360,7 @@ def airbnb_master_pipeline():
 
     @task
     def load_to_kafka(file_path: str):
-        produce_to_kafka_avro(file_path=file_path, topic='airbnb_listings_gold',
-                             schema_registry_url='http://localhost:8081', bootstrap_servers='localhost:9092')
+        produce_to_kafka_avro(file_path=file_path, topic='airbnb_listings_gold')
 
     # Workflow Definition
     raw_data = extract_raw_data()

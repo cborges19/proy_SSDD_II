@@ -1,0 +1,8 @@
+[paths]
+data_dir = "data/raw"
+output_dir = "data/output"
+templates_dir = "src/reports"
+
+[kafka]
+bootstrap_servers = "localhost:9092"
+schema_registry_url = "http://localhost:8081"

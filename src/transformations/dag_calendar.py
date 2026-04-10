@@ -13,9 +13,12 @@ from src.utils import DATA_DIR, OUTPUT_DIR, TEMPLATES_DIR
 TEMPLATE_PATH = TEMPLATES_DIR / "report_calendar.html"
 output_dir = str(OUTPUT_DIR / "reports" / "calendar")
 
+# Initialize the Airflow task logger for real-time observability
+log = logging.getLogger("airflow.task")
+
 @dag(
     start_date=datetime(2026, 4, 9),
-    schedule_interval='@daily',
+    schedule=None,
     catchup=False,
     tags=['airbnb', 'calendar', 'time_series', 'production']
 )
@@ -34,18 +37,23 @@ def airbnb_calendar_pipeline():
     # ---------------------------------------------------------
     @task
     def transform_calendar(file_path: str):
+        # Access Airflow's internal task logger
+        log = logging.getLogger("airflow.task")
         df = pd.read_parquet(file_path)
 
         # --------- AVAILABLE TO BOOLEAN ---------
         # Convert Airbnb 't'/'f' strings into Python boolean types
+        log.info("Mapping Airbnb 't'/'f' strings to boolean types")
         df = map_airbnb_bool(df, ['available'])
 
         # --------- DATE NORMALIZATION ---------
         # Convert date strings to datetime objects for temporal analysis
+        log.info("Normalizing date column for temporal analysis")
         df['date'] = pd.to_datetime(df['date'], errors='coerce')
 
         # --------- DROP NULL COLUMNS ---------
         # Remove price and adjusted_price as they are identified as 100% null
+        log.info("Dropping columns identified as 100% null: ['price', 'adjusted_price']")
         df = df.drop(columns=['price', 'adjusted_price'], errors='ignore')
 
         output_path = "/tmp/calendar_transformed.parquet"
@@ -57,20 +65,25 @@ def airbnb_calendar_pipeline():
     # ---------------------------------------------------------
     @task
     def enrichment_calendar(file_path: str):
+        # Access Airflow's internal task logger
+        log = logging.getLogger("airflow.task")
         df = pd.read_parquet(file_path)
 
         # --------- TEMPORAL VARIABLES ---------
         # Extract weekend flag and time components to analyze occupation patterns
-        df['is_weekend'] = df['date'].dt.dayofweek.isin([5, 6]).astype(int)
-        df['day_of_week'] = df['date'].dt.day_name()
+        log.info("Extracting temporal components and weekend flags")
+        df['day_of_week'] = df['date'].dt.dayofweek
+        df['is_weekend'] = df['day_of_week'].isin([5, 6]).astype(bool)
         df['month'] = df['date'].dt.month
 
-        # --------- PROXIMITY SCORING ---------
-        # Calculate days until the event to account for occupancy variance near Oct
-        reference_date = df['date'].min()
-        df['days_to_event'] = (df['date'] - reference_date).dt.days
+        # --------- DAYS OF EVENT ---------
+        log.info("Mapping special events based on calendar dates")
+        unique_date = df['date'].unique()
+        event_map = {date: get_event(pd.Timestamp(date)) for date in unique_date}
+        df['event'] = df['date'].map(event_map)
 
         # ---------- OCCUPANCY VARIABLE ----------
+        log.info("Calculating occupancy variable (booked) from availability status")
         df['booked'] = ~df['available']
 
         output_path = "/tmp/calendar_enriched.parquet"
@@ -82,6 +95,8 @@ def airbnb_calendar_pipeline():
     # ---------------------------------------------------------
     @task
     def validate_calendar(file_path: str):
+        # Access Airflow's internal task logger
+        log = logging.getLogger("airflow.task")
         df = pd.read_parquet(file_path)
 
         # --------- DATA QUALITY RULES ---------
@@ -103,10 +118,9 @@ def airbnb_calendar_pipeline():
     # ---------------------------------------------------------
     @task
     def generate_calendar_eda(file_path: str):
-        # --------- TEMPORAL OCCUPANCY ANALYSIS ---------   
-        # Initialize the Airflow task logger for real-time observability
+        # Access Airflow's internal task logger
         log = logging.getLogger("airflow.task")
-        
+        # --------- TEMPORAL OCCUPANCY ANALYSIS ---------           
         # Define the destination directory for plots and the HTML dashboard
         output_dir = "data/output/reports/calendar"
     
@@ -128,9 +142,7 @@ def airbnb_calendar_pipeline():
         # Produce the final gold calendar data to Kafka
         produce_to_kafka_avro(
             file_path=file_path,
-            topic='airbnb_calendar_gold',
-            schema_registry_url='http://localhost:8081',
-            bootstrap_servers='localhost:9092'
+            topic='airbnb_calendar_gold'
         )
 
     # Workflow Definition

@@ -9,12 +9,15 @@ import logging
 from src.utils import *
 from src.utils import DATA_DIR, OUTPUT_DIR, TEMPLATES_DIR
 
-TEMPLATE_PATH = TEMPLATES_DIR / "report_calendar.html"
-output_dir = str(OUTPUT_DIR / "reports" / "calendar")
+TEMPLATE_PATH = TEMPLATES_DIR / "report_reviews.html"
+output_dir = str(OUTPUT_DIR / "reports" / "reviews")
+
+# Initialize the Airflow task logger
+log = logging.getLogger("airflow.task")
 
 @dag(
     start_date=datetime(2026, 4, 9),
-    schedule_interval='@weekly',
+    schedule=None,
     catchup=False,
     tags=['airbnb', 'reviews', 'nlp', 'gold_layer']
 )
@@ -33,19 +36,27 @@ def airbnb_reviews_pipeline():
     # ---------------------------------------------------------
     @task
     def transform_reviews(file_path: str):
+        # Access Airflow's internal task logger
+        log = logging.getLogger("airflow.task")
         df = pd.read_parquet(file_path)
 
         # --------- REMOVE NULL CRITICAL ROWS ---------
         # Delete rows where reviewer_id or comments are missing
         # If comments are missing, the review provides no NLP value
+        rows_before = len(df)
         df = df.dropna(subset=['id', 'reviewer_id', 'comments'])
+        rows_after = len(df)
+        log.info(f"Cleaned nulls: dropped {rows_before - rows_after} rows. Remaining: {rows_after} records.")
 
         # --------- DATE NORMALIZATION ---------
         # Convert date strings to datetime objects
         df['date'] = pd.to_datetime(df['date'], errors='coerce')
+        invalid_dates = df['date'].isna().sum()
+        log.info(f"Date normalization completed. {invalid_dates} invalid dates found and coerced to null.")
 
         # --------- DROP UNNECESSARY COLUMNS ---------
         # Remove reviewer_name as it is not needed for the analysis
+        log.info("Removing non-analytical columns for data optimization")
         df = df.drop(columns=['reviewer_name'], errors='ignore')
 
         output_path = "/tmp/reviews_transformed.parquet"
@@ -57,19 +68,25 @@ def airbnb_reviews_pipeline():
     # ---------------------------------------------------------
     @task
     def enrichment_reviews(file_path: str):
+        # Access Airflow's internal task logger
+        log = logging.getLogger("airflow.task")
         df = pd.read_parquet(file_path)
 
         # --------- COMMENTS LENGTH ---------
         # Calculate the raw character count of the review
+        log.info("Calculating review comment lengths")
         df['comments_len'] = df['comments'].str.len().fillna(0).astype(int)
 
         # --------- NLP PREPROCESSING ---------
         # Apply standardized NLP cleaning using the utility function
         # This includes lowercase, HTML removal, and symbol normalization
+        log.info("Starting NLP text cleaning and normalization")
         df['comments_clean'] = df['comments'].apply(clean_text_nlp)
+        log.info("NLP preprocessing completed successfully")
 
         # --------- TEMPORAL FEATURES ---------
         # Extract Year/Month for the upcoming EDA tasks
+        log.info("Extracting temporal features (year, month) from dates")
         df['review_year'] = df['date'].dt.year
         df['review_month'] = df['date'].dt.month
 
@@ -82,6 +99,8 @@ def airbnb_reviews_pipeline():
     # ---------------------------------------------------------
     @task
     def validate_reviews(file_path: str):
+        # Access Airflow's internal task logger
+        log = logging.getLogger("airflow.task")
         df = pd.read_parquet(file_path)
 
         # --------- DATA QUALITY RULES ---------
@@ -103,10 +122,9 @@ def airbnb_reviews_pipeline():
     # ---------------------------------------------------------
     @task
     def generate_reviews_eda(file_path: str):
-        # --------- REVIEWS VISUAL ANALYSIS ---------
-        # Initialize the Airflow task logger
+        # Access Airflow's internal task logger
         log = logging.getLogger("airflow.task")
-        
+        # --------- REVIEWS VISUAL ANALYSIS ---------        
         # Define the output directory for review reports
         output_dir = "data/output/reports/reviews"
         
@@ -128,9 +146,7 @@ def airbnb_reviews_pipeline():
         # Produce the final gold reviews data to Kafka in Avro format
         produce_to_kafka_avro(
             file_path=file_path,
-            topic='airbnb_reviews_gold',
-            schema_registry_url='http://localhost:8081',
-            bootstrap_servers='localhost:9092'
+            topic='airbnb_reviews_gold'
         )
 
     # Workflow Definition

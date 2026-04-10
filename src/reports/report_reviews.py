@@ -94,7 +94,7 @@ def eda_reviews(file_path, output_dir, log, template_path):
     }
 
     # ---------- BUILD JSON PAYLOAD FOR TEMPLATE ----------
-    payload_json = json.dumps({
+    payload_json = {
         "meta": {
             "total_reviews": total_rows,
             "unique_users": unique_users,
@@ -105,7 +105,7 @@ def eda_reviews(file_path, output_dir, log, template_path):
         "reviewers": reviewers_data,
         "length_dist": length_data,
         "words": word_data
-    })
+    }
 
     # ---------- JINJA2 TEMPLATE RENDERING ----------
     if os.path.exists(template_path):
