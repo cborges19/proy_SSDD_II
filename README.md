@@ -41,6 +41,13 @@ La arquitectura híbrida requiere tener Docker para el streaming de datos y el g
 - Python 3.10 o superior instalado en el sistema.
 - Asegúrese de que en `config.toml` los puertos de Kafka apunten a `localhost` (ej. `localhost:9092`) ya que Airflow se ejecuta fuera de la red de Docker.
 
+### Paso 0: Preparación de los Datos
+Por buenas prácticas de control de versiones, los datos originales no se incluyen en el repositorio de GitHub. Antes de iniciar la ejecución, debe descargar los datos de origen:
+1. Descargue el dataset de **Inside Airbnb** correspondiente a la ciudad de Málaga (archivos `listings.csv`, `calendar.csv` y `reviews.csv`).
+2. Mueva estos tres archivos al directorio `data/raw/` dentro del proyecto. 
+
+*(Nota: Aunque la carpeta esté vacía al clonar el repositorio gracias al archivo `.gitkeep`, es estrictamente necesario que los archivos CSV estén allí alojados para que los pipelines funcionen correctamente).*
+
 ### Paso 1: Inicializar la infraestructura de Kafka
 Abra una terminal en la raíz del proyecto y levante el clúster de streaming:
 ```bash
