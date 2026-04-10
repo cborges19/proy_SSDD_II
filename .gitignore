@@ -1,7 +1,7 @@
 .venv/
 data/raw/*.csv
 data/raw/*.geojson
-data/output/*
+data/output/reports/
 airflow.cfg
 airflow.db
 airflow.db-shm
