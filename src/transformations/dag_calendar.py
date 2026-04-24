@@ -7,6 +7,7 @@ from src.reports.report_calendar import eda_calendar
 import logging
 
 from src.utils import *
+from src.kafka.producer_kafka import produce_to_kafka_avro
 
 from src.utils import DATA_DIR, OUTPUT_DIR, TEMPLATES_DIR
 

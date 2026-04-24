@@ -12,6 +12,8 @@ import pathlib
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 from src.utils import *
+from src.kafka.producer_kafka import produce_to_kafka_avro
+
 from src.utils import DATA_DIR, OUTPUT_DIR, TEMPLATES_DIR
 
 

@@ -7,6 +7,8 @@ from src.reports.report_reviews import eda_reviews
 import logging
 
 from src.utils import *
+from src.kafka.producer_kafka import produce_to_kafka_avro
+
 from src.utils import DATA_DIR, OUTPUT_DIR, TEMPLATES_DIR
 
 TEMPLATE_PATH = TEMPLATES_DIR / "report_reviews.html"
