@@ -7,9 +7,19 @@ airflow.db
 airflow.db-shm
 airflow.db-wal
 simple_auth_manager_passwords.json.generated
+
 logs/
-# Ignorar todas las carpetas de caché de Python
+# Ignoramos la carpeta donde el consumer guarda los Parquet
+data/gold/
+*.parquet
+*.avro
+
+
 **/__pycache__/
 *.pyc
 *.pyo
 *.pyd
+
+
+.DS_Store
+.vscode/
