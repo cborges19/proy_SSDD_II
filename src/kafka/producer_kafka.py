@@ -1,6 +1,20 @@
 from confluent_kafka import Producer, SerializingProducer
 from confluent_kafka.schema_registry import SchemaRegistryClient
 from confluent_kafka.schema_registry.avro import AvroSerializer
+import json
+import ujson
+import pandas as pd
+import numpy as np
+
+from datetime import datetime, timedelta
+import pathlib
+import tomllib
+
+PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+with open(PROJECT_ROOT / "config.toml", "rb") as f:
+    config = tomllib.load(f)
+# ... usa config["kafka"]["bootstrap_servers"] en tus funciones
 
 
 def generate_avro_schema(df, record_name):
