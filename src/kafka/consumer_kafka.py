@@ -1,10 +1,14 @@
 import pathlib
 import logging
 import time
+import requests
 from confluent_kafka import DeserializingConsumer
 from confluent_kafka.schema_registry import SchemaRegistryClient
 from confluent_kafka.schema_registry.avro import AvroDeserializer
 from confluent_kafka.serialization import StringDeserializer
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col
+from pyspark.sql.avro.functions import from_avro
 
 # --- CONFIGURACIÓN DE RUTAS ---
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
@@ -116,6 +120,43 @@ def consumer_kafka_avro(topic, idle_timeout_seconds=30, log_to_file=True):
         logger.info(f"- Total mensajes: {total_leidos}")
         logger.info(f"- Columnas: {num_columnas}")
         logger.info("="*60)
+
+
+def get_avro_schema_from_registry(topic, registry_url="http://localhost:8081"):
+    """Consulta el Schema Registry para obtener el esquema Avro de un topic."""
+    # Por defecto, Confluent guarda los esquemas de los valores con el sufijo '-value'
+    subject = f"{topic}-value"
+    url = f"{registry_url}/subjects/{subject}/versions/latest"
+    
+    response = requests.get(url)
+    if response.status_code == 200:
+        return response.json()['schema']
+    else:
+        raise Exception(f"Error obteniendo esquema para {topic}: {response.text}")
+
+def create_kafka_stream_df(spark, topic, kafka_bootstrap="localhost:9092", registry_url="http://localhost:8081"):
+    """Crea un DataFrame de Spark Streaming leyendo de Kafka y deserializando Avro."""
+    
+    # 1. Obtenemos el esquema de forma dinámica
+    avro_schema_str = get_avro_schema_from_registry(topic, registry_url)
+    
+    # 2. Leemos el stream de Kafka (los datos vienen en binario en la columna 'value')
+    # Nota: Omitimos los primeros 5 bytes mágicos que Confluent añade a los mensajes Avro
+    raw_stream_df = spark.readStream \
+        .format("kafka") \
+        .option("kafka.bootstrap.servers", kafka_bootstrap) \
+        .option("subscribe", topic) \
+        .option("startingOffsets", "earliest") \
+        .load()
+    
+    # 3. Deserializamos usando from_avro y el esquema obtenido
+    # Substring extrae los datos saltándose el "Magic Byte" de Confluent (5 bytes)
+    parsed_df = raw_stream_df \
+        .selectExpr("SUBSTRING(value, 6) as avro_value") \
+        .select(from_avro(col("avro_value"), avro_schema_str).alias("data")) \
+        .select("data.*")
+        
+    return parsed_df
 
 if __name__ == "__main__":
     consumer_kafka_avro(
