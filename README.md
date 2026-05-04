@@ -31,7 +31,7 @@ La orquestación se realiza mediante Apache Airflow (ejecutado localmente median
         └── report_reviews.html
 ```
 
-## Guía de Reproducción (Windows / Ubuntu / Mac)
+## Parte 1: Guía de Reproducción de la Infraestructura y ETL (Windows / Ubuntu / Mac)
 
 La arquitectura híbrida requiere tener Docker para el streaming de datos y el gestor de paquetes `uv` para ejecutar Airflow localmente. 
 
@@ -114,7 +114,7 @@ Tras la ejecución exitosa de los DAGs:
 2. **Reportes Visuales:** En el directorio `./data/output/reports/` se generarán tres dashboards interactivos en formato `.html` con las visualizaciones del Análisis Exploratorio de Datos (EDA).
 3. **Kafka:** Los datos enriquecidos se publicarán automáticamente serializados en formato Avro en los tópicos del contenedor Docker (`airbnb_listings_gold`, `airbnb_calendar_gold`, `airbnb_reviews_gold`), listos para su posterior consumo.
 
-## Verificación de Datos en Kafka
+## Paso Opcional :Verificación de Datos en Kafka
 
 Para demostrar que los datos se están procesando y enviando correctamente a las capas "Gold" en el formato **Apache Avro**, se ha incluido un script de utilidad que permite inspeccionar los mensajes en tiempo real.
 
@@ -153,3 +153,47 @@ El script `check_kafka.sh` es generalizable y permite visualizar cualquier topic
    ```bash
    ./check_kafka.sh pipeline_errors 5
    ```
+
+## Parte 2: Procesamiento con Spark Streaming y Entregables
+
+Esta sección detalla cómo ejecutar la segunda parte del proyecto, centrada en el consumo de datos y resolución de consultas continuas mediante PySpark. 
+
+**Nota de ejecución:** Los siguientes comandos utilizan sintaxis general y estándar de Python, por lo que pueden ser introducidos de forma indiferente tanto en entornos Windows como Ubuntu/Mac sin necesidad de modificar las rutas.
+
+### Paso 6: Consumo manual de Apache Kafka
+Para verificar los mensajes directamente desde Kafka (sin Spark) y visualizar el esquema inferido, ejecute el script del consumidor. Este actuará como monitor en tiempo real:
+```bash
+python src/kafka/consumer_kafka.py [topic]
+```
+*Si se ejecutan los DAGs de Airflow en paralelo, se visualizará por consola la recepción de mensajes en el tópico `airbnb_listings_gold` por defecto.*
+
+### Paso 7: Ejecución de Consultas con Spark Streaming (Avro)
+Los scripts de consulta ya están preconfigurados para descargar dinámicamente las dependencias necesarias de Kafka y Avro para Spark (`org.apache.spark:spark-sql-kafka-0-10`, `org.apache.spark:spark-avro`). 
+
+**Consulta 1: Análisis del Calendario**
+Calcula la ocupación media y las reservas totales mediante ventanas temporales:
+```bash
+python src/queries/calendar_query.py
+```
+
+**Consulta 2: Análisis de Sentimiento en Reviews**
+Lee en streaming los comentarios, aplica un modelo NLP (VADER) implementado mediante `pandas_udf` y cuenta el tipo de review en ventanas anuales:
+```bash
+python src/queries/reviews_query.py
+```
+
+### Entregables de la Práctica
+Para facilitar la evaluación, los artefactos solicitados se encuentran estructurados de la siguiente manera:
+
+1. **Capturas de pantalla del Producer y Consumer (sin Spark):** 
+   - El *Producer* se evidencia en los logs de éxito de las tareas finales de los DAGs en Airflow.
+   - El *Consumer* manual se visualiza ejecutando el Paso 6. Las capturas están adjuntas en el documento de entrega.
+2. **Resolución de dependencias Spark Streaming (Avro):**
+   - Evidenciado al ejecutar cualquiera de los scripts de la carpeta `src/queries/`. Al inicializar la sesión, Spark descargará los `.jar` necesarios especificados en la configuración del builder. Las capturas del log de descargas están en el documento de entrega.
+3. **Captura de las tablas leídas:**
+   - La visualización del streaming escribiendo en consola (`format("console")`) se muestra automáticamente por consola al final de la ejecución de las consultas.
+4. **Respuestas a las preguntas:**
+   - Incluidas en la memoria/documento PDF adjunto.
+5. **Scripts con consultas realizadas:**
+   - Ubicados en `src/queries/calendar_query.py` y `src/queries/reviews_query.py`.
+```

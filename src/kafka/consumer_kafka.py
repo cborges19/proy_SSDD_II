@@ -1,6 +1,7 @@
 import pathlib
 import logging
 import time
+import sys
 import requests
 from confluent_kafka import DeserializingConsumer
 from confluent_kafka.schema_registry import SchemaRegistryClient
@@ -10,7 +11,7 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import col
 from pyspark.sql.avro.functions import from_avro
 
-# --- CONFIGURACIÓN DE RUTAS ---
+# --------- PATH CONFIGURATION ---------
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 LOG_DIR = PROJECT_ROOT / "logs" / "consumer_logs"
 
@@ -18,19 +19,19 @@ logger = logging.getLogger("AirbnbMonitor")
 logger.setLevel(logging.INFO)
 
 def consumer_kafka_avro(topic, idle_timeout_seconds=30, log_to_file=True):
-    # --- CONFIGURACIÓN DE LOGS ---
+    # --------- LOG CONFIGURATION ---------
     formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
     
-    # Limpiamos manejadores previos para evitar duplicados si se llama varias veces
+    # Clear previous handlers to avoid duplicates
     if logger.hasHandlers():
         logger.handlers.clear()
 
-    # Siempre añadimos la consola
+    # Always add console handler
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 
-    # Añadimos archivo solo si se solicita
+    # Add file handler if requested
     if log_to_file:
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         specific_log_file = LOG_DIR / f"consumer_{topic}.log"
@@ -43,7 +44,7 @@ def consumer_kafka_avro(topic, idle_timeout_seconds=30, log_to_file=True):
 
     logger.info(f"--- INICIANDO MONITOR PARA: {topic} ---")
     
-    # --- CONFIGURACIÓN DE KAFKA ---
+    # --------- KAFKA CONFIGURATION ---------
     sr_conf = {'url': 'http://localhost:8081'}
     try:
         sr_client = SchemaRegistryClient(sr_conf)
@@ -68,8 +69,8 @@ def consumer_kafka_avro(topic, idle_timeout_seconds=30, log_to_file=True):
         logger.error(f"Error al crear el consumer: {e}")
         return
 
-    # --- LÓGICA DE VISUALIZACIÓN ---
-    # Determinamos intervalo según el contenido del nombre del topic
+    # --------- VISUALIZATION LOGIC ---------
+    # Determine interval based on topic name
     if "calendar" in topic:
         LOG_INTERVAL = 10000
     elif "reviews" in topic:
@@ -123,8 +124,8 @@ def consumer_kafka_avro(topic, idle_timeout_seconds=30, log_to_file=True):
 
 
 def get_avro_schema_from_registry(topic, registry_url="http://localhost:8081"):
-    """Consulta el Schema Registry para obtener el esquema Avro de un topic."""
-    # Por defecto, Confluent guarda los esquemas de los valores con el sufijo '-value'
+    """Fetch Avro schema from Schema Registry."""
+    # Confluent saves value schemas with '-value' suffix by default
     subject = f"{topic}-value"
     url = f"{registry_url}/subjects/{subject}/versions/latest"
     
@@ -135,13 +136,13 @@ def get_avro_schema_from_registry(topic, registry_url="http://localhost:8081"):
         raise Exception(f"Error obteniendo esquema para {topic}: {response.text}")
 
 def create_kafka_stream_df(spark, topic, kafka_bootstrap="localhost:9092", registry_url="http://localhost:8081"):
-    """Crea un DataFrame de Spark Streaming leyendo de Kafka y deserializando Avro."""
+    """Create Spark Streaming DataFrame from Kafka with Avro deserialization."""
     
-    # 1. Obtenemos el esquema de forma dinámica
+    # Get schema dynamically
     avro_schema_str = get_avro_schema_from_registry(topic, registry_url)
     
-    # 2. Leemos el stream de Kafka (los datos vienen en binario en la columna 'value')
-    # Nota: Omitimos los primeros 5 bytes mágicos que Confluent añade a los mensajes Avro
+    # Read Kafka stream binary values
+    # Skip Confluent magic bytes
     raw_stream_df = spark.readStream \
         .format("kafka") \
         .option("kafka.bootstrap.servers", kafka_bootstrap) \
@@ -149,8 +150,8 @@ def create_kafka_stream_df(spark, topic, kafka_bootstrap="localhost:9092", regis
         .option("startingOffsets", "earliest") \
         .load()
     
-    # 3. Deserializamos usando from_avro y el esquema obtenido
-    # Substring extrae los datos saltándose el "Magic Byte" de Confluent (5 bytes)
+    # Deserialize using from_avro and schema
+    # Extract data skipping Confluent magic bytes
     parsed_df = raw_stream_df \
         .selectExpr("SUBSTRING(value, 6) as avro_value") \
         .select(from_avro(col("avro_value"), avro_schema_str).alias("data")) \
@@ -159,8 +160,17 @@ def create_kafka_stream_df(spark, topic, kafka_bootstrap="localhost:9092", regis
     return parsed_df
 
 if __name__ == "__main__":
+    topic = sys.argv[1] if len(sys.argv) > 1 else 'airbnb_listings_gold'
+    
+    allowed_topics = ['airbnb_listings_gold', 'airbnb_calendar_gold', 'airbnb_reviews_gold', 'pipeline_errors']
+
+    if topic not in allowed_topics:
+        print(f"\n[ERROR] Tópico '{topic}' no reconocido.")
+        print(f"Tópicos permitidos: {', '.join(allowed_topics)}")
+        sys.exit(1)
+    
     consumer_kafka_avro(
-        topic='airbnb_listings_gold', 
+        topic=topic, 
         idle_timeout_seconds=10, 
         log_to_file=False
     )
