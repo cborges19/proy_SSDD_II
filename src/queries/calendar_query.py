@@ -1,11 +1,12 @@
 import sys
 import pathlib
-notebook_dir = pathlib.Path.cwd()
-project_root = notebook_dir.parent.parent
+
+# --------- PATH CONFIGURATION ---------
+current_file = pathlib.Path(__file__).resolve()
+project_root = current_file.parent.parent.parent
 
 if str(project_root) not in sys.path:
     sys.path.append(str(project_root))
-    print(f'Directorio raíz añadido al path: {project_root}')
 
 from src.kafka.consumer_kafka import create_kafka_stream_df, consumer_kafka_avro
 from pyspark.sql import SparkSession

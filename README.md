@@ -158,12 +158,16 @@ El script `check_kafka.sh` es generalizable y permite visualizar cualquier topic
 
 Esta sección detalla cómo ejecutar la segunda parte del proyecto, centrada en el consumo de datos y resolución de consultas continuas mediante PySpark. 
 
-**Nota de ejecución:** Los siguientes comandos utilizan sintaxis general y estándar de Python, por lo que pueden ser introducidos de forma indiferente tanto en entornos Windows como Ubuntu/Mac sin necesidad de modificar las rutas.
+**Nota de ejecución:** Los siguientes comandos utilizan sintaxis general y estándar de Python, por lo que pueden ser introducidos de forma indiferente tanto en entornos Windows como Ubuntu/Mac sin necesidad de modificar las rutas. Sin embargo, es importante estar en la raíz del proyecto en la terminal y activar el entorno virtual.
+
+```bash
+source .venv/bin/activate
+```
 
 ### Paso 6: Consumo manual de Apache Kafka
 Para verificar los mensajes directamente desde Kafka (sin Spark) y visualizar el esquema inferido, ejecute el script del consumidor. Este actuará como monitor en tiempo real:
 ```bash
-python src/kafka/consumer_kafka.py [topic]
+python3 src/kafka/consumer_kafka.py [topic]
 ```
 *Si se ejecutan los DAGs de Airflow en paralelo, se visualizará por consola la recepción de mensajes en el tópico `airbnb_listings_gold` por defecto.*
 
@@ -173,13 +177,13 @@ Los scripts de consulta ya están preconfigurados para descargar dinámicamente 
 **Consulta 1: Análisis del Calendario**
 Calcula la ocupación media y las reservas totales mediante ventanas temporales:
 ```bash
-python src/queries/calendar_query.py
+python3 src/queries/calendar_query.py
 ```
 
 **Consulta 2: Análisis de Sentimiento en Reviews**
 Lee en streaming los comentarios, aplica un modelo NLP (VADER) implementado mediante `pandas_udf` y cuenta el tipo de review en ventanas anuales:
 ```bash
-python src/queries/reviews_query.py
+python3 src/queries/reviews_query.py
 ```
 
 ### Entregables de la Práctica
