@@ -8,25 +8,44 @@ La orquestación se realiza mediante Apache Airflow (ejecutado localmente median
 
 ```text
 .
-├── config.toml                     # Configuración centralizada (rutas y red)
-├── docker-compose.yml              # Infraestructura de streaming (Kafka, Zookeeper, SR)
+├── config.toml                     # Configuración general (puertos de Kafka, datos...)
+├── docker-compose.yml              # Infraestructura de streaming (Kafka)
 ├── pyproject.toml / uv.lock        # Gestión estricta de dependencias
+├── README.md                       # Documentación del proyecto
+├── check_kafka.sh                  # Script de validación de Kafka
 ├── data/                           
-│   ├── raw/                        # CSVs originales (listings, calendar, reviews)
-│   └── output/                     # Resultados y reportes (HTML) generados
+│   ├── raw/                        # CSVs originales (+ neighbourhoods.csv/geojson)
+│   └── output/                     
+│       └── reports/                # Reportes generados, organizados por dominio (NUEVO)
+│           ├── calendar/           # Gráficos (PNG) y HTMLs de ocupación
+│           ├── listings/           # Gráficos de precios/distancias y dashboard
+│           └── reviews/            # Gráficos de palabras clave y dashboard
+├── notebooks/                      # Entornos de exploración y prueba
+│   ├── eda/                        # Análisis exploratorio (incluye subcarpeta listings/)
+│   ├── prototyping/                # Prototipado en sucio de los DAGs
+│   └── queries/                    # Consultas interactivas (incluye el mapa en vivo)
+│       ├── calendar_query.ipynb
+│       ├── map_reviews_query.ipynb
+│       └── reviews_query.ipynb
 └── src/                            # Módulos y lógica de negocio
-    ├── __init__.py                 # Obligatorio para reconocimiento de módulos
-    ├── utils.py                    # Funciones modulares de limpieza, imputación y Kafka
-    ├── transformations/            # DAGs de Airflow
+    ├── __init__.py                 
+    ├── utils.py                    
+    ├── kafka/                      # Integración directa con Kafka
+    │   ├── consumer_kafka.py
+    │   └── producer_kafka.py
+    ├── queries/                    # Scripts productivizados de Spark Streaming
+    │   ├── calendar_query.py
+    │   ├── reviews_query.py
+    │   └── error_counter.py
+    ├── transformations/            # DAGs orquestados por Airflow
     │   ├── dag_listings.py
     │   ├── dag_calendar.py
     │   └── dag_reviews.py
     └── reports/                    # Lógica de EDA y plantillas web
-        ├── __init__.py
         ├── report_listings.py      
         ├── report_calendar.py
         ├── report_reviews.py
-        ├── report_listings.html    # Plantillas Jinja2 base
+        ├── report_listings.html    
         ├── report_calendar.html
         └── report_reviews.html
 ```
