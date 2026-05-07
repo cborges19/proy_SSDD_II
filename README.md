@@ -15,11 +15,7 @@ La orquestación se realiza mediante Apache Airflow (ejecutado localmente median
 ├── check_kafka.sh                  # Script de validación de Kafka
 ├── data/                           
 │   ├── raw/                        # CSVs originales (+ neighbourhoods.csv/geojson)
-│   └── output/                     
-│       └── reports/                # Reportes generados, organizados por dominio (NUEVO)
-│           ├── calendar/           # Gráficos (PNG) y HTMLs de ocupación
-│           ├── listings/           # Gráficos de precios/distancias y dashboard
-│           └── reviews/            # Gráficos de palabras clave y dashboard
+│   └── output/                     # Directorio de resultados
 ├── notebooks/                      # Entornos de exploración y prueba
 │   ├── eda/                        # Análisis exploratorio (incluye subcarpeta listings/)
 │   ├── prototyping/                # Prototipado en sucio de los DAGs
@@ -212,23 +208,33 @@ python src\kafka\consumer_kafka.py [topic]
 ### Paso 7: Ejecución de Consultas con Spark Streaming (Avro)
 Los scripts de consulta ya están preconfigurados para descargar dinámicamente las dependencias necesarias de Kafka y Avro para Spark (`org.apache.spark:spark-sql-kafka-0-10`, `org.apache.spark:spark-avro`). 
 
+> **Nota técnica sobre la generación de volcados:**
+> Para almacenar los resultados, se utiliza el operador de redirección del sistema operativo (`>`) apuntando a la carpeta `data/output/`. Se ha optado por esta estrategia en lugar de usar un sumidero de archivos nativo de Spark (`.format("text")`) por dos motivos arquitectónicos:
+> 1. Spark Structured Streaming **no soporta el modo `complete`** (necesario para ver tablas de agregaciones globales actualizadas) en sumideros de tipo archivo.
+> 2. Spark no genera un único archivo `.txt` limpio, sino un directorio particionado con metadatos. La redirección de la salida estándar mantiene el código limpio y genera exactamente el entregable requerido.
+
 **Consulta 1: Análisis del Calendario**
 Calcula la ocupación media y las reservas totales mediante ventanas temporales:
 
-*   **Ubuntu / Linux / Mac:** `python3 src/queries/calendar_query.py`
-*   **Windows:** `python src\queries\calendar_query.py`
+* **Ubuntu / Linux / Mac:** `python3 src/queries/calendar_query.py > data/output/salida_1.txt`
+* **Windows:** `python src\queries\calendar_query.py > data\output\salida_1.txt`
 
 **Consulta 2: Análisis de Sentimiento en Reviews**
 Lee en streaming los comentarios, aplica un modelo NLP (VADER) implementado mediante `pandas_udf` y cuenta el tipo de review en ventanas anuales:
 
-*   **Ubuntu / Linux / Mac:** `python3 src/queries/reviews_query.py`
-*   **Windows:** `python src\queries\reviews_query.py`
+* **Ubuntu / Linux / Mac:** `python3 src/queries/reviews_query.py > data/output/salida_2.txt`
+* **Windows:** `python src\queries\reviews_query.py > data\output\salida_2.txt`
 
 **Consulta 3: Revisión de Errores**
 Esta es una consulta extra que lee información básica sobre errores en validación del DAG de los datos.
 
-*   **Ubuntu / Linux / Mac:** `python3 src/queries/error_counter.py`
-*   **Windows:** `python src\queries\error_counter.py`
+* **Ubuntu / Linux / Mac:** `python3 src/queries/error_counter.py > data/output/salida_3.txt`
+* **Windows:** `python src\queries\error_counter.py > data\output\salida_3.txt`
+
+**Consulta 4: Análisis de Sentimiento en Mapa**
+Lee dos streaming de datos (listings y reviews), haciendo un join y graficando un mapa por coordenadas con la ubicación de alojamientos con reviews buenas y malas.
+
+En el caso de esta consulta, para ver el resultado hay que ejecutar el notebook interactivo en `notebooks/queries/map_reviews_query.ipynb`.
 
 ### Entregables de la Práctica
 Para facilitar la evaluación, los artefactos solicitados se encuentran estructurados de la siguiente manera:
