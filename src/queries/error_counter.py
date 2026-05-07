@@ -4,7 +4,8 @@ from pyspark.sql.types import StructType, StructField, StringType
 
 # --------- INITIALIZE THE SPARK SESSION ---------
 spark = SparkSession.builder \
-    .appname("KafkaErrorStreamCounter") \
+    .appName("KafkaErrorStreamCounter") \
+    .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.13:4.1.1") \
     .getOrCreate()
 
 # --------- DEFINE THE SCHEMA FOR ERROR JSON ---------
@@ -13,7 +14,7 @@ error_schema = StructType([
     StructField("variable", StringType(), True),
     StructField("message", StringType(), True),
     StructField("timestamp", StringType(), True)
-])
+])  
 
 # --------- CONNECT TO THE KAFKA STREAM ---------
 error_stream_df = spark.readStream \
@@ -29,12 +30,13 @@ parsed_errors_df = error_stream_df.selectExpr("CAST(value AS STRING)") \
     .select("data.*")
 
 # --------- QUERY: COUNT ERRORS PER VARIABLE ---------
-error_counts_df = parsed_errors_df.groupBy("variable").count()
+error_details_df = parsed_errors_df.select("timestamp", "task", "variable", "message")
   
 # --------- SINK: DISPLAY THE RESULTS ---------
-query = error_counts_df.writeStream \
-    .outputMode("complete") \
+query = error_details_df.writeStream \
+    .outputMode("append") \
     .format("console") \
+    .option("truncate", "false") \
     .start()
 
 query.awaitTermination()

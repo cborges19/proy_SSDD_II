@@ -153,22 +153,41 @@ El script `check_kafka.sh` es generalizable y permite visualizar cualquier topic
    ```bash
    ./check_kafka.sh pipeline_errors 5
    ```
-
+   
 ## Parte 2: Procesamiento con Spark Streaming y Entregables
 
 Esta sección detalla cómo ejecutar la segunda parte del proyecto, centrada en el consumo de datos y resolución de consultas continuas mediante PySpark. 
 
-**Nota de ejecución:** Los siguientes comandos utilizan sintaxis general y estándar de Python, por lo que pueden ser introducidos de forma indiferente tanto en entornos Windows como Ubuntu/Mac sin necesidad de modificar las rutas. Sin embargo, es importante estar en la raíz del proyecto en la terminal y activar el entorno virtual.
+**Nota de ejecución:** Los siguientes comandos utilizan sintaxis general y estándar de Python. Es importante estar en la raíz del proyecto en la terminal y activar el entorno virtual según su sistema operativo:
 
+**Para Ubuntu / Linux / Mac:**
 ```bash
 source .venv/bin/activate
 ```
 
+**Para Windows (PowerShell):**
+```powershell
+.venv\Scripts\Activate.ps1
+```
+
+**Para Windows (CMD):**
+```cmd
+.venv\Scripts\activate.bat
+```
+
 ### Paso 6: Consumo manual de Apache Kafka
-Para verificar los mensajes directamente desde Kafka (sin Spark) y visualizar el esquema inferido, ejecute el script del consumidor. Este actuará como monitor en tiempo real:
+Para verificar los mensajes directamente desde Kafka (sin Spark) y visualizar el esquema inferido, ejecute el script del consumidor. Este actuará como monitor en tiempo real. Los nombres de los topics son `airbnb_listings_gold`, `airbnb_reviews_gold`, `airbnb_calendar_gold` o `pipeline_errors`.
+
+**Para Ubuntu / Linux / Mac:**
 ```bash
 python3 src/kafka/consumer_kafka.py [topic]
 ```
+
+**Para Windows (PowerShell / CMD):**
+```bash
+python src\kafka\consumer_kafka.py [topic]
+```
+
 *Si se ejecutan los DAGs de Airflow en paralelo, se visualizará por consola la recepción de mensajes en el tópico `airbnb_listings_gold` por defecto.*
 
 ### Paso 7: Ejecución de Consultas con Spark Streaming (Avro)
@@ -176,28 +195,34 @@ Los scripts de consulta ya están preconfigurados para descargar dinámicamente 
 
 **Consulta 1: Análisis del Calendario**
 Calcula la ocupación media y las reservas totales mediante ventanas temporales:
-```bash
-python3 src/queries/calendar_query.py
-```
+
+*   **Ubuntu / Linux / Mac:** `python3 src/queries/calendar_query.py`
+*   **Windows:** `python src\queries\calendar_query.py`
 
 **Consulta 2: Análisis de Sentimiento en Reviews**
 Lee en streaming los comentarios, aplica un modelo NLP (VADER) implementado mediante `pandas_udf` y cuenta el tipo de review en ventanas anuales:
-```bash
-python3 src/queries/reviews_query.py
-```
+
+*   **Ubuntu / Linux / Mac:** `python3 src/queries/reviews_query.py`
+*   **Windows:** `python src\queries\reviews_query.py`
+
+**Consulta 3: Revisión de Errores**
+Esta es una consulta extra que lee información básica sobre errores en validación del DAG de los datos.
+
+*   **Ubuntu / Linux / Mac:** `python3 src/queries/error_counter.py`
+*   **Windows:** `python src\queries\error_counter.py`
 
 ### Entregables de la Práctica
 Para facilitar la evaluación, los artefactos solicitados se encuentran estructurados de la siguiente manera:
 
-1. **Capturas de pantalla del Producer y Consumer (sin Spark):** 
-   - El *Producer* se evidencia en los logs de éxito de las tareas finales de los DAGs en Airflow.
-   - El *Consumer* manual se visualiza ejecutando el Paso 6. Las capturas están adjuntas en el documento de entrega.
-2. **Resolución de dependencias Spark Streaming (Avro):**
-   - Evidenciado al ejecutar cualquiera de los scripts de la carpeta `src/queries/`. Al inicializar la sesión, Spark descargará los `.jar` necesarios especificados en la configuración del builder. Las capturas del log de descargas están en el documento de entrega.
-3. **Captura de las tablas leídas:**
-   - La visualización del streaming escribiendo en consola (`format("console")`) se muestra automáticamente por consola al final de la ejecución de las consultas.
-4. **Respuestas a las preguntas:**
-   - Incluidas en la memoria/documento PDF adjunto.
-5. **Scripts con consultas realizadas:**
-   - Ubicados en `src/queries/calendar_query.py` y `src/queries/reviews_query.py`.
+1.  **Capturas de pantalla del Producer y Consumer (sin Spark):** 
+    *   El *Producer* se evidencia en los logs de éxito de las tareas finales de los DAGs en Airflow.
+    *   El *Consumer* manual se visualiza ejecutando el Paso 6. Las capturas están adjuntas en el documento de entrega.
+2.  **Resolución de dependencias Spark Streaming (Avro):**
+    *   Evidenciado al ejecutar cualquiera de los scripts de la carpeta `src/queries/`. Al inicializar la sesión, Spark descargará los `.jar` necesarios especificados en la configuración del builder. Las capturas del log de descargas están en el documento de entrega.
+3.  **Captura de las tablas leídas:**
+    *   La visualización del streaming escribiendo en consola (`format("console")`) se muestra automáticamente por consola al final de la ejecución de las consultas.
+4.  **Respuestas a las preguntas:**
+    *   Incluidas en la memoria/documento PDF adjunto.
+5.  **Scripts con consultas realizadas:**
+    *   Ubicados en `src/queries/calendar_query.py`, `src/queries/reviews_query.py` y `src/queries/error_counter.py`.
 ```

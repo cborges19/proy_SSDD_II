@@ -2,6 +2,7 @@ import pathlib
 import logging
 import time
 import sys
+import json
 import requests
 from confluent_kafka import DeserializingConsumer
 from confluent_kafka.schema_registry import SchemaRegistryClient
@@ -43,25 +44,31 @@ def consumer_kafka_avro(topic, idle_timeout_seconds=30, log_to_file=True):
         logger.info("Escritura de logs en archivo desactivada.")
 
     logger.info(f"--- INICIANDO MONITOR PARA: {topic} ---")
-    
+
     # --------- KAFKA CONFIGURATION ---------
+    string_deserializer = StringDeserializer('utf_8')
     sr_conf = {'url': 'http://localhost:8081'}
-    try:
-        sr_client = SchemaRegistryClient(sr_conf)
-        avro_deserializer = AvroDeserializer(sr_client)
-        string_deserializer = StringDeserializer('utf_8')
-    except Exception as e:
-        logger.error(f"Fallo conexión Schema Registry: {e}")
-        return
+    
+    if topic == "pipeline_errors":
+        value_deserializer = string_deserializer
+        logger.info(f"Configurando deserializador de TEXTO (JSON) para {topic}")
+    else:
+        try:
+            sr_client = SchemaRegistryClient(sr_conf)
+            value_deserializer = AvroDeserializer(sr_client)
+            logger.info(f"Configurando deserializador AVRO para {topic}")
+        except Exception as e:
+            logger.error(f"Fallo conexión Schema Registry: {e}")
+            return
 
     consumer_conf = {
         'bootstrap.servers': 'localhost:9092',
         'key.deserializer': string_deserializer,
-        'value.deserializer': avro_deserializer,
+        'value.deserializer': value_deserializer,
         'group.id': f"{topic}_consumer_group", 
         'auto.offset.reset': 'earliest'      
     }
-
+    
     try:
         consumer = DeserializingConsumer(consumer_conf)
         consumer.subscribe([topic])
@@ -98,9 +105,21 @@ def consumer_kafka_avro(topic, idle_timeout_seconds=30, log_to_file=True):
                 continue
 
             last_msg_time = time.time() 
-            dato = msg.value()
+            dato_crudo = msg.value()
             total_leidos += 1
-            
+
+            if isinstance(dato_crudo, str):
+                # Si es un string (JSON de pipeline_errors), lo convertimos a diccionario
+                try:
+                    dato = json.loads(dato_crudo)
+                except Exception as e:
+                    logger.error(f"Error al parsear JSON: {e}")
+                    dato = {"error_original": dato_crudo}
+            else:
+                # Si ya es un diccionario (Avro de tópicos Gold), lo usamos tal cual
+                dato = dato_crudo
+
+            # Ahora esta línea ya no fallará porque 'dato' siempre será un diccionario
             if total_leidos == 1 and dato:
                 num_columnas = len(dato.keys())
                 logger.info(f"Esquema detectado: {topic} tiene {num_columnas} columnas.")
