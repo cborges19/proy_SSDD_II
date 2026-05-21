@@ -288,15 +288,7 @@ This phase adds a web interface on top of the existing pipeline. It requires
 the Gold parquet from Phase 1 and optionally the Spark ML processor for
 live inference.
 
-### Step A — Install additional dependencies
-
-```bash
-uv add streamlit folium streamlit-folium branca mlflow
-# Optional but recommended for best model performance:
-uv add xgboost
-```
-
-### Step B — Train the ML models
+### Step A — Train the ML models
 
 Run once after each Airflow ETL execution:
 
@@ -309,7 +301,7 @@ This evaluates multiple regression algorithms to predict listing prices, logging
 To view your results, open http://localhost:5000  or '127.0.0.1:5000' in your browser to inspect the metrics, comparison tables, and plots.
 
 
-### Step C — Start the Spark ML Processor
+### Step B — Start the Spark ML Processor
 
 Required only for Tabs 2 and 3 (Kafka-based price prediction and recommendations).
 Run in a dedicated terminal and keep it running:
@@ -328,7 +320,7 @@ python src\queries\ml_processor.py
 This subscribes to `topic_peticiones` and `topic_likes` and publishes results
 to `topic_precios` and `topic_sugerencias`.
 
-### Step D — Launch the Streamlit application
+### Step C — Launch the Streamlit application
 
 **Linux / macOS:**
 ```bash

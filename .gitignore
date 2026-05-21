@@ -2,6 +2,7 @@
 data/raw/*.csv
 data/raw/*.geojson
 data/output/reports/
+data/output/*.txt
 airflow.cfg
 airflow.db
 airflow.db-shm
