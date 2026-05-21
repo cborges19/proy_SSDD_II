@@ -65,7 +65,7 @@ def _load_listings(gold_path: pathlib.Path) -> pd.DataFrame:
 
 
 def _build_deck(df: pd.DataFrame) -> pdk.Deck:
-    """Constructs a PyDeck scatter-plot layer coloured by relative price."""
+    """Constructs a PyDeck scatter-plot layer."""
     if df.empty or "latitude" not in df.columns:
         return None
 
@@ -75,7 +75,6 @@ def _build_deck(df: pd.DataFrame) -> pdk.Deck:
     df = df.copy()
     df["_color"] = ((df["price"] - price_min) / price_range).apply(_price_to_rgb)
 
-    # Tooltip fields (only show columns that are present)
     tooltip_fields = {
         "neighbourhood_cleansed": "Neighbourhood",
         "room_type": "Room type",
@@ -95,7 +94,7 @@ def _build_deck(df: pd.DataFrame) -> pdk.Deck:
         get_position=["longitude", "latitude"],
         get_fill_color="_color",
         get_radius=80,
-        radius_min_pixels=3,
+        radius_min_pixels=4,
         radius_max_pixels=14,
         pickable=True,
         auto_highlight=True,
@@ -112,10 +111,10 @@ def _build_deck(df: pd.DataFrame) -> pdk.Deck:
         layers=[layer],
         initial_view_state=view,
         tooltip={"html": tooltip_html, "style": {"color": "white", "background": "#333"}},
-        map_style="mapbox://styles/mapbox/light-v10",
-    )
-
-
+        # CAMBIO SEGURO: Usamos 'dark' o 'light'. Es un mapa político/urbano, 
+        # pero al ser nativo no requiere tokens y tus puntos contrastarán genial.
+        map_style="https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
+        )
 def render_search_tab(project_root: pathlib.Path, config: dict) -> None:
     """
     Renders the entire Search & Map tab.
@@ -132,7 +131,7 @@ def render_search_tab(project_root: pathlib.Path, config: dict) -> None:
     # ----- GUARD: data not yet available -----
     if not gold_path.exists():
         st.info(
-            "📂 **Gold parquet not found.**  "
+            "**Gold parquet not found.**  "
             "Run the `airbnb_master_pipeline` DAG in Airflow first; "
             "it will write the file to `data/output/listings_gold.parquet`.",
             icon="ℹ️",
@@ -225,7 +224,7 @@ def render_search_tab(project_root: pathlib.Path, config: dict) -> None:
     st.divider()
 
     # ----- DATA TABLE -----
-    st.subheader(f"📋 Listing Details  ({len(df_filtered):,} results)")
+    st.subheader(f"Listing Details  ({len(df_filtered):,} results)")
     table_cols = [
         c for c in _DISPLAY_COLS
         if c in df_filtered.columns and c not in ("latitude", "longitude")
@@ -240,7 +239,7 @@ def render_search_tab(project_root: pathlib.Path, config: dict) -> None:
     # ----- DOWNLOAD -----
     csv = df_filtered[table_cols].to_csv(index=False).encode("utf-8")
     st.download_button(
-        label="⬇️ Download filtered results as CSV",
+        label="Download filtered results as CSV",
         data=csv,
         file_name="airbnb_malaga_filtered.csv",
         mime="text/csv",

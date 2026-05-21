@@ -3,7 +3,7 @@ Tab 3 · Live Suggestions (Streaming Layer)
 ==========================================
 UX flow:
   1. User browses a paginated grid of listings.
-  2. Clicking "❤️ Like" on any listing sends its ID to *topic_likes*.
+  2. Clicking "Like" on any listing sends its ID to *topic_likes*.
   3. The Spark ML processor looks up the KNN model, finds the K most
      similar listings, and publishes their IDs to *topic_sugerencias*.
   4. Streamlit polls for the matching response and renders the
@@ -121,7 +121,7 @@ def _render_recommendation_panel(
     """
     Renders the recommendation results panel on the right side of the screen.
     """
-    st.markdown("### 🎯 You might also like…")
+    st.markdown("### You might also like…")
 
     if not recommendations:
         st.info("Like a listing on the left to see personalised recommendations.")
@@ -166,7 +166,7 @@ def render_suggestions_tab(project_root: pathlib.Path, config: dict) -> None:
     gold_path = project_root / "data" / "output" / "listings_gold.parquet"
 
     # ----- HEADER -----
-    st.markdown("### ⭐ Live Listing Recommendations")
+    st.markdown("### Live Listing Recommendations")
     st.caption(
         '<span class="badge-streaming">STREAMING</span>  '
         "Like a listing → Kafka → Spark KNN → recommendations appear here.",
@@ -176,7 +176,7 @@ def render_suggestions_tab(project_root: pathlib.Path, config: dict) -> None:
     # ----- GUARD: data not yet available -----
     if not gold_path.exists():
         st.info(
-            "📂 **Gold parquet not found.**  "
+            " **Gold parquet not found.**  "
             "Run the `airbnb_master_pipeline` DAG in Airflow first.",
             icon="ℹ️",
         )
@@ -253,7 +253,7 @@ def render_suggestions_tab(project_root: pathlib.Path, config: dict) -> None:
 
     # ----- CLEAR BUTTON -----
     if liked_id or st.session_state.get("recommendations"):
-        if st.button("🔄 Clear selections", key="clear_likes"):
+        if st.button("Clear selections", key="clear_likes"):
             st.session_state.pop("liked_id", None)
             st.session_state.pop("recommendations", None)
             st.rerun()

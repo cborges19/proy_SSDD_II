@@ -54,7 +54,7 @@ from sklearn.preprocessing import OrdinalEncoder, StandardScaler
 
 warnings.filterwarnings("ignore")
 
-# ----- XGBOOST (optional, skip gracefully if not installed) -----
+# ----- XGBOOST -----
 try:
     from xgboost import XGBRegressor
     HAS_XGB = True
@@ -122,7 +122,7 @@ def _load_and_clean(path: pathlib.Path) -> pd.DataFrame:
     logger.info("Loading gold parquet from: %s", path)
     df = pd.read_parquet(path)
 
-    # Normalise boolean columns to int (0/1) for sklearn compatibility
+    # Normalise boolean columns to int (0/1) 
     for col in PRICE_FEATURES_BOOL:
         if col in df.columns:
             df[col] = df[col].map(
@@ -213,7 +213,7 @@ def evaluate_and_select_price_model(df: pd.DataFrame, models_dir: pathlib.Path) 
     best_model_name = None
     best_estimator = None
 
-    # ----- 1. MLflow Search & Evaluation -----
+    # ----- MLflow Search & Evaluation -----
     for model_name, estimator in candidate_models.items():
         logger.info("Evaluating: %s", model_name)
         pipeline = _build_pipeline_for_estimator(estimator, avail_features)
@@ -259,12 +259,11 @@ def evaluate_and_select_price_model(df: pd.DataFrame, models_dir: pathlib.Path) 
     print("\n=== Price Prediction — Model Comparison ===")
     print(results_df.to_string(index=False))
 
-    # ----- 2. Production Retraining (100% of data) -----
+    # ----- Production Retraining (100% of data) -----
     logger.info("--- Retraining winning model (%s) on 100%% of data ---", best_model_name)
     prod_pipeline = _build_pipeline_for_estimator(best_estimator, avail_features)
     
     with mlflow.start_run(run_name=f"Production_{best_model_name}"):
-        # Fit on ALL available data (X, y) instead of X_train, y_train
         prod_pipeline.fit(X, y)
         
         # Log production metrics and physical model to MLflow
@@ -294,11 +293,10 @@ def train_knn_model(df: pd.DataFrame, models_dir: pathlib.Path) -> None:
     listing_ids    = df_knn["id"].values
     feature_matrix = df_knn[available_knn].values
 
-    # Scale features to equalise contribution
     scaler         = StandardScaler()
     feature_scaled = scaler.fit_transform(feature_matrix)
 
-    # Fit NearestNeighbors with cosine metric
+    # Fit NearestNeighbors 
     knn = NearestNeighbors(
         n_neighbors=min(KNN_N_NEIGHBORS, len(df_knn)),
         metric="cosine",
@@ -307,7 +305,7 @@ def train_knn_model(df: pd.DataFrame, models_dir: pathlib.Path) -> None:
     )
     knn.fit(feature_scaled)
 
-    # Compute average intra-cluster diversity (metric for MLflow)
+    # Compute average intra-cluster diversity 
     sample_idx = np.random.choice(len(listing_ids), size=min(500, len(listing_ids)), replace=False)
     dists, _ = knn.kneighbors(feature_scaled[sample_idx])
     avg_dist = dists[:, 1:].mean()
@@ -328,7 +326,6 @@ def train_knn_model(df: pd.DataFrame, models_dir: pathlib.Path) -> None:
     joblib.dump(knn_bundle, out_path)
     logger.info("KNN bundle saved to: %s", out_path)
 
-    # Log to MLflow
     mlflow.set_experiment("airbnb_knn_recommendation")
     with mlflow.start_run(run_name="Production_KNN"):
         mlflow.log_param("metric", "cosine")
