@@ -21,7 +21,7 @@ PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-# ----- PAGE CONFIG (must be first Streamlit call) -----
+# ----- PAGE CONFIG -----
 st.set_page_config(
     page_title="Airbnb Málaga · Data Dashboard",
     page_icon="🏠",

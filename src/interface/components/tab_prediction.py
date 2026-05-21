@@ -1,8 +1,8 @@
 """
-Tab 2 · Price Prediction (Streaming Layer)
+Tab 2 · Price Prediction 
 ==========================================
 UX flow:
-  1. Host fills in listing characteristics via a form.
+  1. User fills in listing characteristics via a form.
   2. Streamlit produces a JSON request to *topic_peticiones*.
   3. The Spark ML processor (src/queries/ml_processor.py) reads it,
      applies a pre-trained Random Forest pipeline, and publishes the
@@ -26,7 +26,7 @@ from src.interface.kafka_client import request_price_prediction
 
 logger = logging.getLogger(__name__)
 
-# ----- FEATURE SCHEMA (must match train_models.py) -----
+# ----- FEATURE SCHEMA -----
 _NUM_FEATURES  = ["accommodates", "bathrooms", "bedrooms", "beds", "num_amenities", "dist_center_km"]
 _CAT_FEATURES  = ["room_type", "neighbourhood_cleansed"]
 _BOOL_FEATURES = ["host_is_superhost", "instant_bookable"]
@@ -103,7 +103,7 @@ def render_prediction_tab(project_root: pathlib.Path, config: dict) -> None:
     # ----- INFO BANNERS -----
     if local_model is None:
         st.warning(
-            "⚠️ No trained model found at `models/price_model.pkl`.  "
+            "No trained model found at `models/price_model.pkl`.  "
             "Run `python src/models/train_models.py` first.",
             icon="⚠️",
         )
@@ -121,7 +121,7 @@ def render_prediction_tab(project_root: pathlib.Path, config: dict) -> None:
     left, right = st.columns([2, 1])
 
     with left:
-        st.subheader("🏡 Listing Characteristics")
+        st.subheader("Listing Characteristics")
 
         form_col1, form_col2 = st.columns(2)
 
@@ -144,7 +144,7 @@ def render_prediction_tab(project_root: pathlib.Path, config: dict) -> None:
         instant_bookable = st.checkbox("Instant Bookable", value=False)
 
     with right:
-        st.subheader("📊 Pipeline Architecture")
+        st.subheader("Pipeline Architecture")
         st.markdown(
             """
             ```
@@ -177,7 +177,7 @@ def render_prediction_tab(project_root: pathlib.Path, config: dict) -> None:
 
     with col_btn:
         use_streaming = st.toggle("Use Kafka / Spark Streaming", value=True)
-        predict_clicked = st.button("🚀 Predict Price", type="primary", use_container_width=True)
+        predict_clicked = st.button("Predict Price", type="primary", use_container_width=True)
 
     if predict_clicked:
         form_values = {

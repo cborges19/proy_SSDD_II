@@ -34,11 +34,11 @@ _DISPLAY_COLS = [
     "longitude",
 ]
 
-# ----- COLOUR SCALE: price → RGB (blue=cheap, red=expensive) -----
+# ----- COLOUR SCALE-----
 def _price_to_rgb(normalised: float) -> list[int]:
     """Maps a 0-1 price ratio to a blue→red colour gradient."""
-    r = int(255 * normalised)
-    b = int(255 * (1 - normalised))
+    r = int(255 * normalised) # Expensive
+    b = int(255 * (1 - normalised)) # Cheap
     return [r, 80, b, 180]
 
 
@@ -111,8 +111,6 @@ def _build_deck(df: pd.DataFrame) -> pdk.Deck:
         layers=[layer],
         initial_view_state=view,
         tooltip={"html": tooltip_html, "style": {"color": "white", "background": "#333"}},
-        # CAMBIO SEGURO: Usamos 'dark' o 'light'. Es un mapa político/urbano, 
-        # pero al ser nativo no requiere tokens y tus puntos contrastarán genial.
         map_style="https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
         )
 def render_search_tab(project_root: pathlib.Path, config: dict) -> None:

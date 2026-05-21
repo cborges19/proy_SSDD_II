@@ -27,7 +27,7 @@ TOPIC_PRECIOS     = "topic_precios"      # Spark → Streamlit (price results)
 TOPIC_LIKES       = "topic_likes"        # Streamlit → Spark (like events)
 TOPIC_SUGERENCIAS = "topic_sugerencias"  # Spark → Streamlit (KNN results)
 
-# ----- DEFAULT POLL TIMEOUT (seconds) -----
+# ----- DEFAULT POLL TIMEOUT  -----
 DEFAULT_TIMEOUT = 45
 
 
