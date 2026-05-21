@@ -6,6 +6,7 @@ import os
 
 from src.reports.report_listings import eda_listings
 import logging
+import shutil
 
 import pathlib
 
@@ -340,6 +341,18 @@ def airbnb_master_pipeline():
         
         validate_and_report(df, validation_rules)
         return file_path
+    
+    @task
+    def save_gold_parquet(file_path: str):
+        log = logging.getLogger("airflow.task")
+        dest_dir  = OUTPUT_DIR 
+        dest_path = str(dest_dir / "listings_gold.parquet")
+    
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy(file_path, dest_path)
+        log.info("Gold parquet saved to: %s", dest_path)
+    
+        return dest_path
 
     # ---------------------------------------------------------
     # TASK 5: EDA (Reporting & Insights)
@@ -371,8 +384,9 @@ def airbnb_master_pipeline():
     phys_clean = transform_data(raw_data)
     logic_enriched = enrichment_data(phys_clean)
     validated_data = validate_data(logic_enriched)
-    eda_done = generate_eda_report(validated_data)
-    load_to_kafka(eda_done)
+    gold_path = save_gold_parquet(validated_data)
+    eda_done = generate_eda_report(gold_path)
+    load_to_kafka(gold_path)
 
 # Instantiate the DAG
 dag_instance = airbnb_master_pipeline()
