@@ -28,3 +28,21 @@ services:
       SCHEMA_REGISTRY_HOST_NAME: schema-registry
       SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: 'kafka:29092'
       SCHEMA_REGISTRY_LISTENERS: 'http://0.0.0.0:8081'
+
+  kafka-init:
+    image: confluentinc/cp-kafka:7.4.0
+    depends_on:
+      - kafka
+    command: >
+      bash -c "
+        echo 'Esperando a que Kafka esté listo...'
+        cub kafka-ready -b kafka:29092 1 40
+        
+        echo 'Creando topics...'
+        kafka-topics --create --if-not-exists --topic topic_peticiones --bootstrap-server kafka:29092
+        kafka-topics --create --if-not-exists --topic topic_precios --bootstrap-server kafka:29092
+        kafka-topics --create --if-not-exists --topic topic_likes --bootstrap-server kafka:29092
+        kafka-topics --create --if-not-exists --topic topic_sugerencias --bootstrap-server kafka:29092
+        
+        echo 'Topics creados con éxito. Saliendo...'
+      "
